@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ParkEase - Smart Parking Finder & Reservation in Tier-1 Cities</title>
+
+    <!-- Google Fonts: Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet CSS & JS for Interactive Map (Free, OpenStreetMap) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Top Announcement Bar -->
+    <div class="bg-gradient-to-r from-sky-700 via-sky-600 to-indigo-700 text-white text-xs py-2 px-4 text-center font-medium shadow-sm">
+        <span class="inline-flex items-center gap-1.5">
+            <span class="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <b>Tier-1 City Parking Solution:</b> 100% Authorized & Tow-Free Spots in Delhi NCR, Mumbai, Bengaluru, Pune & Hyderabad.
+        </span>
+    </div>
+
+    <!-- Navigation Header -->
+    <header class="navbar px-4 sm:px-8 py-3.5">
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+            
+            <!-- Logo & Brand -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center font-black text-xl shadow-md shadow-sky-600/30">
+                    P
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl font-extrabold text-slate-900 tracking-tight">Park<span class="text-sky-600">Ease</span></span>
+                        <span class="bg-sky-100 text-sky-800 text-[10px] font-bold px-1.5 py-0.5 rounded">INDIA</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 hidden sm:block">Find & Reserve Parking • Avoid Towing & Challans</p>
+                </div>
+            </div>
+
+            <!-- City Selection & GPS Trigger -->
+            <div class="flex items-center gap-2 sm:gap-3">
+                <div class="relative">
+                    <select id="citySelect" class="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-xl px-3 sm:px-4 py-2 pr-8 border-none focus:ring-2 focus:ring-sky-500 cursor-pointer transition-all">
+                        <option value="delhi">📍 Delhi NCR</option>
+                        <option value="mumbai">📍 Mumbai</option>
+                        <option value="bengaluru">📍 Bengaluru</option>
+                        <option value="pune">📍 Pune</option>
+                        <option value="hyderabad">📍 Hyderabad</option>
+                        <option value="all">🌐 All Tier-1 Cities</option>
+                    </select>
+                </div>
+
+                <button id="locateMeBtn" class="flex items-center gap-1.5 bg-white border border-slate-200 hover:border-sky-400 text-slate-700 hover:text-sky-600 px-3 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all">
+                    <i data-lucide="crosshair" class="w-4 h-4 text-sky-600"></i>
+                    <span class="hidden md:inline">Near Me</span>
+                </button>
+
+                <button onclick="openHostModal()" class="hidden lg:flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all">
+                    <i data-lucide="plus-circle" class="w-4 h-4 text-emerald-600"></i>
+                    <span>List Your Space (Earn ₹)</span>
+                </button>
+
+                <button onclick="openMyBookingsDrawer()" class="relative flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all">
+                    <i data-lucide="ticket" class="w-4 h-4"></i>
+                    <span class="hidden sm:inline">My Passes</span>
+                    <span id="myBookingsCount" class="hidden absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-5 h-5 rounded-full font-bold flex items-center justify-center">0</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="max-w-7xl mx-auto w-full px-4 sm:px-8 py-5 flex-1 flex flex-col gap-5">
+        
+        <!-- Filter Bar & Search Controls -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
+            
+            <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+                
+                <!-- Search Input -->
+                <div class="relative flex-1">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+                    <input type="text" id="searchInput" placeholder="Search by area, landmark, mall, metro station (e.g. Connaught Place, Indiranagar, BKC)..." 
+                           class="w-full bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white text-slate-900 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm font-medium focus:ring-2 focus:ring-sky-100 outline-none transition-all">
+                </div>
+
+                <!-- Vehicle Type Switcher -->
+                <div class="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl overflow-x-auto">
+                    <button class="vehicle-btn active px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5" data-type="fourWheeler">
+                        <i data-lucide="car" class="w-3.5 h-3.5"></i>
+                        <span>Car (4W)</span>
+                    </button>
+                    <button class="vehicle-btn px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-slate-600 hover:text-slate-900" data-type="twoWheeler">
+                        <i data-lucide="bike" class="w-3.5 h-3.5"></i>
+                        <span>Bike (2W)</span>
+                    </button>
+                    <button class="vehicle-btn px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-slate-600 hover:text-slate-900" data-type="suv">
+                        <i data-lucide="truck" class="w-3.5 h-3.5"></i>
+                        <span>SUV</span>
+                    </button>
+                    <button class="vehicle-btn px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-slate-600 hover:text-slate-900" data-type="ev">
+                        <i data-lucide="zap" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        <span>EV Fast</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Secondary Filters & Fast Flags -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
+                
+                <div class="flex flex-wrap items-center gap-4 text-slate-600">
+                    <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900 select-none font-medium">
+                        <input type="checkbox" id="filterFastag" class="rounded text-sky-600 focus:ring-sky-500 w-4 h-4 border-slate-300">
+                        <span>FASTag Auto-Debit</span>
+                    </label>
+
+                    <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900 select-none font-medium">
+                        <input type="checkbox" id="filterEv" class="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 border-slate-300">
+                        <span>EV Charger Ready</span>
+                    </label>
+
+                    <label class="flex items-center gap-1.5 cursor-pointer hover:text-slate-900 select-none font-medium">
+                        <input type="checkbox" id="filterTowingFree" class="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 border-slate-300" checked>
+                        <span>Verified Tow-Free Zone</span>
+                    </label>
+                </div>
+
+                <div class="flex items-center gap-2 ml-auto">
+                    <span class="text-slate-500 text-xs font-medium">Sort by:</span>
+                    <select id="sortSelect" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-sky-500 outline-none">
+                        <option value="avail">Available Slots (High to Low)</option>
+                        <option value="price_asc">Price: Low to High</option>
+                        <option value="price_desc">Price: High to Low</option>
+                        <option value="rating">Top Rated</option>
+                        <option value="dist">Distance (Nearest First)</option>
+                    </select>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- City Live Stats Bar -->
+        <div class="flex flex-wrap items-center justify-between bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm text-xs">
+            <div id="cityQuickStats" class="flex items-center gap-4">
+                <!-- Dynamically updated by JS -->
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-slate-400">Live Status:</span>
+                <span id="spotsCountBadge" class="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full font-bold text-[11px]">Loading...</span>
+            </div>
+        </div>
+
+        <!-- Split Grid: Spot Cards List & Leaflet Map View -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-[580px]">
+            
+            <!-- Left Side: Parking Spots List (5 Cols on Large screens) -->
+            <div class="lg:col-span-6 xl:col-span-5 flex flex-col gap-3 order-2 lg:order-1 overflow-y-auto max-h-[720px] pr-1" id="spotsContainer">
+                <!-- Dynamically populated with Cards by app.js -->
+            </div>
+
+            <!-- Right Side: Interactive Leaflet Map (7 Cols on Large screens) -->
+            <div class="lg:col-span-6 xl:col-span-7 order-1 lg:order-2 h-[380px] lg:h-[720px] sticky top-20 rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-100 relative">
+                <div id="mapContainer" class="w-full h-full"></div>
+                
+                <!-- Map Floating Legend -->
+                <div class="absolute bottom-3 left-3 bg-white/90 backdrop-blur-md px-3 py-2 rounded-xl text-[11px] font-semibold text-slate-700 shadow-lg border border-slate-200/80 z-[1000] flex items-center gap-3">
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Available (&gt;15)</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> Filling Fast</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Few Left (&lt;5)</span>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Why ParkEase Banner / Value Proposition -->
+    <section class="bg-white border-t border-slate-200 py-10 px-4 sm:px-8 mt-12">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-xl font-bold text-slate-900 text-center mb-2">How ParkEase Solves Tier-1 City Parking Nightmares</h2>
+            <p class="text-xs sm:text-sm text-slate-500 text-center max-w-2xl mx-auto mb-8">
+                In cities like Delhi, Bangalore, Mumbai, and Pune, average drivers waste 20+ minutes circling blocks, risk towing challans of ₹2,000+, and fall prey to unauthorized parking mafias.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 text-center sm:text-left">
+                <div class="p-5 rounded-2xl bg-sky-50 border border-sky-100">
+                    <div class="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center mb-3">
+                        <i data-lucide="shield-check" class="w-5 h-5"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-sm mb-1">100% Towing-Free Guarantee</h3>
+                    <p class="text-xs text-slate-600">Only municipal approved lots, authorized malls, and verified private spaces.</p>
+                </div>
+
+                <div class="p-5 rounded-2xl bg-emerald-50 border border-emerald-100">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center mb-3">
+                        <i data-lucide="radio" class="w-5 h-5"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-sm mb-1">Live Vacancy Tracking</h3>
+                    <p class="text-xs text-slate-600">Know exactly how many slots are empty before you step out of your home.</p>
+                </div>
+
+                <div class="p-5 rounded-2xl bg-indigo-50 border border-indigo-100">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center mb-3">
+                        <i data-lucide="zap" class="w-5 h-5"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-sm mb-1">FASTag Seamless Entry</h3>
+                    <p class="text-xs text-slate-600">Barrier opens automatically with RFID & FASTag. Zero cash hassle at exit gates.</p>
+                </div>
+
+                <div class="p-5 rounded-2xl bg-amber-50 border border-amber-100">
+                    <div class="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center mb-3">
+                        <i data-lucide="coins" class="w-5 h-5"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-900 text-sm mb-1">Monetize Empty Driveways</h3>
+                    <p class="text-xs text-slate-600">Residents and commercial owners can list vacant spots and earn ₹8k-₹25k monthly.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-400 py-8 px-4 sm:px-8 text-xs">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-2">
+                <span class="font-bold text-white text-base">ParkEase</span>
+                <span>• Urban Mobility & Smart Parking Platform for India</span>
+            </div>
+            <div class="flex items-center gap-6">
+                <span>Active in: Delhi NCR • Bengaluru • Mumbai • Pune • Hyderabad</span>
+            </div>
+            <div class="text-slate-500">
+                &copy; 2026 ParkEase Technologies. All rights reserved.
+            </div>
+        </div>
+    </footer>
+
+    <!-- =============================================================== -->
+    <!-- MODAL 1: Instant Spot Booking & Checkout Modal -->
+    <!-- =============================================================== -->
+    <div id="bookingModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl animate-fade-in border border-slate-100">
+            
+            <div class="relative h-32 bg-slate-100">
+                <img id="modalSpotImage" src="" alt="Spot preview" class="w-full h-full object-cover">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent"></div>
+                <button onclick="closeBookingModal()" class="absolute top-3 right-3 bg-black/50 hover:bg-black/80 text-white p-1.5 rounded-full transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+                <div class="absolute bottom-3 left-4 right-4 text-white">
+                    <div id="modalSpotName" class="font-bold text-base leading-snug">Parking Spot</div>
+                    <div id="modalSpotArea" class="text-xs text-slate-200">Location Area</div>
+                </div>
+            </div>
+
+            <form onsubmit="confirmBooking(event)" class="p-5 space-y-4">
+                
+                <!-- Vehicle Number & Type -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Vehicle Type</label>
+                        <select id="modalVehicleSelect" onchange="updateBookingCost()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500">
+                            <option value="fourWheeler">Car / Hatchback</option>
+                            <option value="twoWheeler">Two-Wheeler (Bike/Scooter)</option>
+                            <option value="suv">SUV / MUV</option>
+                            <option value="ev">Electric Vehicle (With Charging)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Vehicle Plate No. *</label>
+                        <input type="text" id="vehicleNumberInput" placeholder="DL 01 AB 1234" required 
+                               class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-900 outline-none focus:ring-2 focus:ring-sky-500">
+                    </div>
+                </div>
+
+                <!-- Timing & Duration -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Expected Entry Time</label>
+                        <input type="time" id="bookingStartTime" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Duration</label>
+                        <select id="bookingDuration" onchange="updateBookingCost()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 outline-none">
+                            <option value="1">1 Hour</option>
+                            <option value="2" selected>2 Hours (Recommended)</option>
+                            <option value="3">3 Hours</option>
+                            <option value="5">5 Hours</option>
+                            <option value="8">Full Day (8+ Hours)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Live Availability Badge inside Modal -->
+                <div class="flex items-center justify-between p-2.5 bg-emerald-50 rounded-xl border border-emerald-100 text-xs">
+                    <span class="flex items-center gap-1.5 text-emerald-800 font-medium">
+                        <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+                        Slot availability verified
+                    </span>
+                    <span id="modalFreeSlots" class="font-bold text-emerald-700">14 Slots Free</span>
+                </div>
+
+                <!-- Fare Breakdown -->
+                <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-100 space-y-1.5 text-xs">
+                    <div class="flex justify-between text-slate-500">
+                        <span>Parking Hourly Rate</span>
+                        <span id="fareHourlyRate" class="font-medium text-slate-700">₹40/hr</span>
+                    </div>
+                    <div class="flex justify-between text-slate-500">
+                        <span>Base Fare</span>
+                        <span id="fareBaseAmount" class="font-medium text-slate-700">₹80</span>
+                    </div>
+                    <div class="flex justify-between text-slate-500">
+                        <span>GST (18%) + Tech Convenience</span>
+                        <span id="fareGstAmount" class="font-medium text-slate-700">₹19</span>
+                    </div>
+                    <div class="border-t border-slate-200 pt-1.5 flex justify-between text-sm font-bold text-slate-900">
+                        <span>Total Payable Amount</span>
+                        <span id="fareTotalAmount" class="text-sky-600 text-base">₹99</span>
+                    </div>
+                </div>
+
+                <!-- Payment Selection -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">Payment Method</label>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <label class="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-200 hover:border-sky-500 cursor-pointer bg-white transition-all text-center">
+                            <input type="radio" name="payMethod" value="UPI Instant QR" checked class="mb-1">
+                            <span class="font-semibold text-slate-800">UPI / QR</span>
+                            <span class="text-[10px] text-slate-400">GPay, PhonePe</span>
+                        </label>
+                        <label class="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-200 hover:border-sky-500 cursor-pointer bg-white transition-all text-center">
+                            <input type="radio" name="payMethod" value="FASTag Auto" class="mb-1">
+                            <span class="font-semibold text-slate-800">FASTag</span>
+                            <span class="text-[10px] text-slate-400">Auto Debit</span>
+                        </label>
+                        <label class="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-200 hover:border-sky-500 cursor-pointer bg-white transition-all text-center">
+                            <input type="radio" name="payMethod" value="Pay at Counter" class="mb-1">
+                            <span class="font-semibold text-slate-800">At Gate</span>
+                            <span class="text-[10px] text-slate-400">Cash / Card</span>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-sm shadow-lg shadow-sky-600/30 transition-all flex items-center justify-center gap-2">
+                    <span>Reserve & Generate Smart Pass</span>
+                    <i data-lucide="check" class="w-4 h-4"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- =============================================================== -->
+    <!-- MODAL 2: Digital Smart Parking Pass / Ticket with Live QR -->
+    <!-- =============================================================== -->
+    <div id="passModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[2100] items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl animate-fade-in border border-slate-100 relative">
+            
+            <button onclick="closePassModal()" class="no-print absolute top-3 right-3 bg-black/10 hover:bg-black/20 text-slate-700 p-1.5 rounded-full z-20 transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+
+            <!-- Pass Top Section -->
+            <div class="bg-gradient-to-br from-sky-600 to-indigo-700 text-white p-5 text-center relative">
+                <div class="inline-block bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-1">
+                    OFFICIAL SMART PASS
+                </div>
+                <h3 id="passSpotName" class="font-bold text-base leading-tight">Spot Name</h3>
+                <p id="passArea" class="text-xs text-sky-100 mt-0.5">Location Area</p>
+                
+                <div class="mt-4 bg-white/10 backdrop-blur-md rounded-2xl p-2.5 flex items-center justify-around">
+                    <div>
+                        <div class="text-[10px] text-sky-200">ALLOCATED SLOT</div>
+                        <div id="passSlotNumber" class="text-xl font-black text-amber-300">B2 - #42</div>
+                    </div>
+                    <div class="h-8 w-px bg-white/20"></div>
+                    <div>
+                        <div class="text-[10px] text-sky-200">DURATION</div>
+                        <div id="passDuration" class="text-base font-bold text-white">2 Hours</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pass Middle QR Code -->
+            <div class="p-6 text-center">
+                
+                <!-- Simulated QR Container -->
+                <div class="w-40 h-40 mx-auto bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-3 relative shadow-inner">
+                    <!-- SVG QR Code pattern -->
+                    <svg viewBox="0 0 100 100" class="w-28 h-28 text-slate-900 fill-current">
+                        <rect x="10" y="10" width="20" height="20" />
+                        <rect x="70" y="10" width="20" height="20" />
+                        <rect x="10" y="70" width="20" height="20" />
+                        <rect x="15" y="15" width="10" height="10" fill="white" />
+                        <rect x="75" y="15" width="10" height="10" fill="white" />
+                        <rect x="15" y="75" width="10" height="10" fill="white" />
+                        <rect x="40" y="20" width="6" height="6" />
+                        <rect x="50" y="20" width="6" height="6" />
+                        <rect x="40" y="40" width="20" height="20" />
+                        <rect x="70" y="50" width="8" height="8" />
+                        <rect x="70" y="70" width="10" height="10" />
+                        <rect x="20" y="40" width="6" height="6" />
+                        <rect x="50" y="75" width="12" height="6" />
+                    </svg>
+                    <div class="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Scan at Boom Barrier</div>
+                </div>
+
+                <div class="mt-4 space-y-1.5 text-xs text-left bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <div class="flex justify-between"><span class="text-slate-500">Pass ID:</span> <b id="passBookingId" class="text-slate-800">PK-928172</b></div>
+                    <div class="flex justify-between"><span class="text-slate-500">Vehicle No:</span> <b id="passVehicleNo" class="text-slate-800">DL 01 AB 1234</b></div>
+                    <div class="flex justify-between"><span class="text-slate-500">Paid Amount:</span> <b id="passTotal" class="text-emerald-600">₹99</b></div>
+                    <div class="flex justify-between"><span class="text-slate-500">Payment:</span> <b id="passPayMethod" class="text-slate-800">UPI Instant QR</b></div>
+                    <div class="flex justify-between"><span class="text-slate-500">Entry Time:</span> <b id="passTime" class="text-slate-800">Just Now</b></div>
+                </div>
+
+                <div class="mt-4 flex gap-2 no-print">
+                    <a id="passGoogleMapsBtn" href="#" target="_blank" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20">
+                        <i data-lucide="navigation" class="w-4 h-4"></i>
+                        <span>Start Navigation</span>
+                    </a>
+                    <button onclick="window.print()" class="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center">
+                        <i data-lucide="printer" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================================== -->
+    <!-- MODAL 3: Host / List Your Space Modal (Monetization) -->
+    <!-- =============================================================== -->
+    <div id="hostModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl animate-fade-in border border-slate-100">
+            <div class="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-5 relative">
+                <button onclick="closeHostModal()" class="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white p-1 rounded-full">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+                <div class="text-[10px] font-bold uppercase tracking-wider text-emerald-200 mb-1">Peer-to-Peer Parking Network</div>
+                <h3 class="text-lg font-bold">List Your Parking Spot & Earn</h3>
+                <p class="text-xs text-emerald-100 mt-0.5">Monetize your empty driveway, apartment parking slot, or commercial plot.</p>
+            </div>
+
+            <!-- Earnings Estimator Widget -->
+            <div class="bg-emerald-50/70 p-4 border-b border-emerald-100 flex items-center justify-between text-xs">
+                <div>
+                    <span class="text-emerald-800 font-semibold block">Estimated Monthly Earnings</span>
+                    <span class="text-[11px] text-slate-500">Based on Tier-1 city demand</span>
+                </div>
+                <div id="estimatedEarningsText" class="text-2xl font-black text-emerald-700">
+                    ₹18,720
+                </div>
+            </div>
+
+            <form onsubmit="submitHostSpace(event)" class="p-5 space-y-4 text-xs">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Target City</label>
+                    <select id="hostCitySelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium text-slate-800 outline-none">
+                        <option value="delhi">Delhi NCR</option>
+                        <option value="bengaluru">Bengaluru</option>
+                        <option value="mumbai">Mumbai</option>
+                        <option value="pune">Pune</option>
+                        <option value="hyderabad">Hyderabad</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Spot Name / Title</label>
+                    <input type="text" id="hostNameInput" placeholder="e.g. Indiranagar Gated Driveway Space" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Complete Address / Landmark</label>
+                    <input type="text" id="hostAddressInput" placeholder="e.g. Near 100ft Road, Opp. Starbucks" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">No. of Slots</label>
+                        <input type="number" id="hostSlotsInput" min="1" max="50" value="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Available Hrs/Day</label>
+                        <input type="number" id="hostHoursInput" min="1" max="24" value="8" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Rate (₹/Hour)</label>
+                        <input type="number" id="hostRateInput" min="10" max="200" value="45" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium outline-none">
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i>
+                    <span>Publish Spot on Live Network</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- =============================================================== -->
+    <!-- DRAWER: My Active & Past Bookings -->
+    <!-- =============================================================== -->
+    <div id="bookingsDrawer" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[2000] flex justify-end">
+        <div class="bg-white w-full max-w-md h-full shadow-2xl p-5 flex flex-col justify-between overflow-y-auto animate-fade-in">
+            <div>
+                <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="ticket" class="w-5 h-5 text-sky-600"></i>
+                        <h3 class="font-bold text-slate-900 text-base">My Smart Parking Passes</h3>
+                    </div>
+                    <button onclick="closeMyBookingsDrawer()" class="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <div id="myBookingsList" class="mt-4 space-y-3">
+                    <!-- Populated dynamically from localStorage -->
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-100">
+                <button onclick="closeMyBookingsDrawer()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">
+                    Close Drawer
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/data.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        // Initialize Lucide icons on boot
+        lucide.createIcons();
+    </script>
+</body>
+</html>
