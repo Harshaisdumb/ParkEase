@@ -1,0 +1,20 @@
+# Environment secrets
+.env
+*.local
+
+# Node modules
+node_modules/
+
+# Logs & temp files
+*.log
+npm-debug.log*
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Testing screenshots
+screenshot*.png
+test_screenshot*.png

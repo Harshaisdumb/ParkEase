@@ -36,9 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadExistingBookings();
     renderVerifiedReviews();
     populateGenericSpotDropdown();
+    initUserProfileAndCrm();
 });
 
-// Load Map API preferences from localStorage
+// Load Map API preferences from localStorage and window.ENV / .env
 function loadMapSettings() {
     try {
         const saved = JSON.parse(localStorage.getItem('parkease_map_settings') || '{}');
@@ -51,8 +52,60 @@ function loadMapSettings() {
         console.warn("Failed to load map settings:", e);
     }
 
+    // Check window.ENV (from env.js or synced from .env)
+    if (window.ENV && window.ENV.GOOGLE_MAPS_API_KEY) {
+        const envKey = window.ENV.GOOGLE_MAPS_API_KEY.trim();
+        if (envKey && envKey !== 'your_google_maps_api_key_here' && envKey !== '') {
+            googleApiKey = envKey;
+            activeMapEngine = window.ENV.MAP_ENGINE || 'google';
+        }
+    }
+
+    // Attempt to read .env file if served over local web server
+    tryFetchEnvFile();
+
     updateActiveMapBadge();
 }
+
+// Read .env directly if served via local web server (http://localhost)
+async function tryFetchEnvFile() {
+    try {
+        const res = await fetch('.env');
+        if (res.ok) {
+            const content = await res.text();
+            content.split('\n').forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.startsWith('#')) {
+                    const [k, ...v] = trimmed.split('=');
+                    const key = k ? k.trim() : '';
+                    const val = v.join('=').trim().replace(/^["']|["']$/g, '');
+                    if (key === 'GOOGLE_MAPS_API_KEY' && val && val !== 'your_google_maps_api_key_here') {
+                        googleApiKey = val;
+                        activeMapEngine = 'google';
+                    }
+                    if (key === 'GROQ_API_KEY' && val && val !== 'your_groq_api_key_here') {
+                        if (!window.ENV) window.ENV = {};
+                        window.ENV.GROQ_API_KEY = val;
+                    }
+                    if (key === 'GROQ_MODEL' && val) {
+                        if (!window.ENV) window.ENV = {};
+                        window.ENV.GROQ_MODEL = val;
+                    }
+                }
+            });
+            updateActiveMapBadge();
+        }
+    } catch (e) {
+        // file:/// protocol triggers normal CORS block, fallback to env.js
+    }
+}
+
+// Global Google Maps Auth Failure Handler
+window.gm_authFailure = function () {
+    console.error("Google Maps authentication failure. Falling back to OpenStreetMap.");
+    showToast("Google Maps Key Error (Check billing/restrictions). Reverted to Free OpenStreetMap.", "error");
+    initLeafletMap();
+};
 
 function updateActiveMapBadge() {
     const badge = document.getElementById('activeMapApiBadge');
@@ -94,10 +147,9 @@ function initLeafletMap() {
             scrollWheelZoom: true
         }).setView(city.center, city.zoom);
 
-        // OpenStreetMap CartoDB Positron / OSM Tiles
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
+        // Clean Standard OpenStreetMap Tiles (100% Free & No Watermark)
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             maxZoom: 19
         }).addTo(map);
 
@@ -325,62 +377,64 @@ function renderSpots() {
 
         // Spot Card HTML
         cardsHTML += `
-            <div id="card-${spot.id}" class="spot-card bg-white rounded-2xl border border-slate-200 p-4 shadow-sm hover:shadow-md transition-all duration-200 hover:border-sky-300">
-                <div class="flex gap-4">
-                    <div class="relative w-28 h-28 rounded-xl overflow-hidden flex-shrink-0 bg-slate-100">
+            <div id="card-${spot.id}" class="spot-card bg-white rounded-2xl border border-slate-200 p-3.5 sm:p-4 shadow-sm hover:shadow-md transition-all duration-200 hover:border-sky-300 w-full max-w-full">
+                <div class="flex gap-3 sm:gap-4 items-stretch min-w-0">
+                    <div class="relative w-24 sm:w-28 h-auto min-h-[96px] sm:min-h-[110px] rounded-xl overflow-hidden flex-shrink-0 bg-slate-100 self-stretch">
                         <img src="${spot.image}" alt="${spot.name}" class="w-full h-full object-cover">
                         <div onclick="openRatingModal('${spot.id}')" title="Click to rate this facility" class="absolute bottom-1.5 left-1.5 bg-black/75 hover:bg-amber-600 transition-colors backdrop-blur-sm text-white px-2 py-0.5 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer">
                             <i data-lucide="star" class="w-3 h-3 text-amber-400 fill-amber-400"></i> ${spot.rating}
                         </div>
                     </div>
 
-                    <div class="flex-1 flex flex-col justify-between">
+                    <div class="flex-1 min-w-0 flex flex-col justify-between">
                         <div>
-                            <div class="flex items-start justify-between gap-2">
-                                <h3 class="font-bold text-slate-900 text-base leading-snug line-clamp-1 hover:text-sky-600 cursor-pointer" onclick="zoomToSpot(${spot.lat}, ${spot.lng})">
-                                    ${spot.name}
-                                </h3>
-                                <div class="text-right flex-shrink-0">
-                                    <div class="text-lg font-black text-sky-600">₹${ratePerHour}<span class="text-xs font-normal text-slate-500">/hr</span></div>
-                                    <div class="text-[10px] text-slate-400 font-medium">₹${spot.rates.dayPass} Full Day</div>
+                            <div class="flex items-start justify-between gap-2 min-w-0">
+                                <div class="min-w-0 flex-1">
+                                    <h3 class="font-bold text-slate-900 text-sm sm:text-base leading-snug truncate hover:text-sky-600 cursor-pointer" onclick="zoomToSpot(${spot.lat}, ${spot.lng})" title="${spot.name}">
+                                        ${spot.name}
+                                    </h3>
+                                    <p class="text-xs text-slate-500 mt-0.5 flex items-center gap-1 min-w-0 truncate">
+                                        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i>
+                                        <span class="truncate">${spot.area}</span>
+                                    </p>
+                                </div>
+                                <div class="text-right flex-shrink-0 pl-1">
+                                    <div class="text-base sm:text-lg font-black text-sky-600 leading-tight">₹${ratePerHour}<span class="text-xs font-normal text-slate-500">/hr</span></div>
+                                    <div class="text-[10px] text-slate-400 font-medium whitespace-nowrap">₹${spot.rates.dayPass} Day</div>
                                 </div>
                             </div>
-                            
-                            <p class="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 flex-shrink-0"></i>
-                                <span class="line-clamp-1">${spot.area}</span>
-                            </p>
-                        </div>
 
-                        <div class="mt-2 flex flex-wrap items-center gap-1.5">
-                            <span class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded border ${badgeClass}">
-                                <span class="w-1.5 h-1.5 rounded-full ${availClass} mr-1.5"></span>
-                                ${spot.slots.available} Slots Free
-                            </span>
-                            ${spot.fastagEnabled ? '<span class="badge-tag badge-fastag"><i data-lucide="zap" class="w-3 h-3"></i>FASTag Auto</span>' : ''}
-                            ${spot.slots.evAvailable > 0 ? `<span class="badge-tag badge-ev"><i data-lucide="battery-charging" class="w-3 h-3"></i>${spot.slots.evAvailable} EV Ports</span>` : ''}
-                            ${spot.towingFreeGuaranteed ? '<span class="badge-tag badge-towing"><i data-lucide="shield-check" class="w-3 h-3"></i>Tow-Free Zone</span>' : ''}
-                            ${distanceText}
-                        </div>
-
-                        <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                            <div class="text-[11px] text-slate-500 flex items-center gap-1.5">
-                                <span class="font-medium text-slate-700">${spot.type}</span>
-                                <span>•</span>
-                                <span>${spot.operator}</span>
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded border ${badgeClass}">
+                                    <span class="w-1.5 h-1.5 rounded-full ${availClass} mr-1.5"></span>
+                                    ${spot.slots.available} Slots Free
+                                </span>
+                                ${spot.fastagEnabled ? '<span class="badge-tag badge-fastag"><i data-lucide="zap" class="w-3 h-3"></i>FASTag Auto</span>' : ''}
+                                ${spot.slots.evAvailable > 0 ? `<span class="badge-tag badge-ev"><i data-lucide="battery-charging" class="w-3 h-3"></i>${spot.slots.evAvailable} EV Ports</span>` : ''}
+                                ${spot.towingFreeGuaranteed ? '<span class="badge-tag badge-towing"><i data-lucide="shield-check" class="w-3 h-3"></i>Tow-Free Zone</span>' : ''}
+                                ${distanceText}
                             </div>
-                            <div class="flex items-center gap-1.5">
-                                <button onclick="openRatingModal('${spot.id}')" title="Rate this facility" class="px-2 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 border border-amber-200">
+                        </div>
+
+                        <!-- Card Footer: Row 1 = Operator Info, Row 2 = Action Buttons -->
+                        <div class="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-2 min-w-0">
+                            <div class="text-[11px] text-slate-500 flex items-center gap-1 min-w-0 truncate">
+                                <span class="font-medium text-slate-700 truncate">${spot.type}</span>
+                                <span class="text-slate-300">•</span>
+                                <span class="truncate">${spot.operator}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 w-full min-w-0">
+                                <button onclick="openRatingModal('${spot.id}')" title="Rate this facility" class="px-2 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1 border border-amber-200 flex-shrink-0">
                                     <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-500"></i>
-                                    <span class="hidden sm:inline">Rate</span>
+                                    <span class="text-[11px]">Rate</span>
                                 </button>
-                                <button onclick="calculateRouteToSpot('${spot.id}')" title="Calculate Driving Route" class="px-2.5 py-1.5 bg-slate-100 hover:bg-sky-50 text-slate-700 hover:text-sky-700 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1">
+                                <button onclick="calculateRouteToSpot('${spot.id}')" title="Calculate Driving Route" class="px-2 py-1.5 bg-slate-100 hover:bg-sky-50 text-slate-700 hover:text-sky-700 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 flex-shrink-0">
                                     <i data-lucide="navigation" class="w-3.5 h-3.5 text-sky-600"></i>
-                                    <span class="hidden sm:inline">Route</span>
+                                    <span class="text-[11px]">Route</span>
                                 </button>
-                                <button onclick="openBookingModal('${spot.id}')" class="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-all flex items-center gap-1">
-                                    Book Spot
-                                    <i data-lucide="arrow-right" class="w-3 h-3"></i>
+                                <button onclick="openBookingModal('${spot.id}')" class="flex-1 min-w-0 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1">
+                                    <span class="truncate">Book Spot</span>
+                                    <i data-lucide="arrow-right" class="w-3 h-3 flex-shrink-0"></i>
                                 </button>
                             </div>
                         </div>
@@ -676,6 +730,16 @@ function openMapSettingsModal() {
     document.getElementById('toggleGeocodingApi').checked = isGeocodingEnabled;
     document.getElementById('toggleRoutingApi').checked = isRoutingEnabled;
 
+    const envBadge = document.getElementById('envKeyStatusBadge');
+    if (envBadge) {
+        if (window.ENV && window.ENV.GOOGLE_MAPS_API_KEY && window.ENV.GOOGLE_MAPS_API_KEY.trim()) {
+            envBadge.classList.remove('hidden');
+            envBadge.innerText = 'Active from env.js / .env';
+        } else {
+            envBadge.classList.add('hidden');
+        }
+    }
+
     toggleMapProviderUI(activeMapEngine);
 
     modal.classList.remove('hidden');
@@ -718,22 +782,27 @@ function testGoogleMapsKey() {
         return;
     }
 
-    showToast("Testing API Key connection...", "info");
+    showToast("Validating Google Maps API Key...", "info");
 
-    fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=India&key=${encodeURIComponent(key)}`)
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === 'OK') {
-                showToast("Key Verified! Google Maps Geocoding & Maps API are active.", "success");
-            } else if (data.status === 'REQUEST_DENIED') {
-                showToast(`API Key Error: ${data.error_message || 'Access Denied'}`, "error");
-            } else {
-                showToast(`Status: ${data.status}`, "info");
-            }
-        })
-        .catch(() => {
-            showToast("Test request sent. Key saved for validation on map render.", "info");
-        });
+    const testScriptId = 'gmaps-test-script';
+    const old = document.getElementById(testScriptId);
+    if (old) old.remove();
+
+    window.__gmapsTestCallback = function () {
+        showToast("Google Maps Key Verified! Maps API loaded successfully.", "success");
+        delete window.__gmapsTestCallback;
+        const el = document.getElementById(testScriptId);
+        if (el) el.remove();
+    };
+
+    const script = document.createElement('script');
+    script.id = testScriptId;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__gmapsTestCallback`;
+    script.async = true;
+    script.onerror = () => {
+        showToast("Network error or invalid Google Maps script URL.", "error");
+    };
+    document.head.appendChild(script);
 }
 
 function saveAndApplyMapSettings() {
@@ -1301,6 +1370,19 @@ function openBookingModal(spotId) {
     document.getElementById('modalFreeSlots').innerText = `${spot.slots.available} Slots Free`;
     document.getElementById('modalVehicleSelect').value = currentVehicleType;
 
+    // Auto-fill from saved user profile if available
+    try {
+        const profile = JSON.parse(localStorage.getItem('parkease_user_profile') || 'null');
+        if (profile) {
+            if (profile.vehicleNumber && document.getElementById('vehicleNumberInput')) {
+                document.getElementById('vehicleNumberInput').value = profile.vehicleNumber;
+            }
+            if (profile.vehicleType && document.getElementById('modalVehicleSelect')) {
+                document.getElementById('modalVehicleSelect').value = profile.vehicleType;
+            }
+        }
+    } catch(e) {}
+
     // Reset slot display
     document.getElementById('selectedSlotNameDisplay').innerText = currentSelectedSlot.name;
 
@@ -1350,9 +1432,25 @@ function updateBookingCost() {
         document.getElementById('fareEvAmount').innerText = `₹${evAddon}`;
     }
 
+    // Check for active ₹50 welcome discount
+    let discount = 0;
+    const discountRow = document.getElementById('fareWelcomeDiscountRow');
+    try {
+        const profile = JSON.parse(localStorage.getItem('parkease_user_profile') || 'null');
+        if (profile && profile.discount && currentPassMode !== 'monthly') {
+            discount = profile.discount;
+            if (discountRow) discountRow.classList.remove('hidden');
+        } else {
+            if (discountRow) discountRow.classList.add('hidden');
+        }
+    } catch(e) {
+        if (discountRow) discountRow.classList.add('hidden');
+    }
+
     const convenienceFee = 5;
     const gst = Math.round((baseFare + evAddon) * 0.18);
-    const total = baseFare + evAddon + convenienceFee + gst;
+    const subtotal = baseFare + evAddon + convenienceFee + gst;
+    const total = Math.max(10, subtotal - discount);
 
     document.getElementById('fareBaseAmount').innerText = `₹${baseFare}`;
     document.getElementById('fareGstAmount').innerText = `₹${gst}`;
@@ -1463,28 +1561,28 @@ function openMyBookingsDrawer() {
         `;
     } else {
         container.innerHTML = bookings.map(b => `
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-sky-300 transition-all">
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                    <span class="font-bold text-sky-700">${b.id}</span>
-                    <span class="px-2 py-0.5 rounded-full font-semibold ${b.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${b.status}</span>
+            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-sky-300 transition-all w-full max-w-full overflow-hidden min-w-0">
+                <div class="flex items-center justify-between text-xs mb-1.5 min-w-0">
+                    <span class="font-bold text-sky-700 truncate mr-2">${b.id}</span>
+                    <span class="px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${b.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${b.status}</span>
                 </div>
-                <h4 class="font-bold text-sm text-slate-900">${b.spotName}</h4>
-                <p class="text-xs text-slate-500 mt-0.5">${b.area}</p>
-                <div class="mt-3 grid grid-cols-2 gap-2 text-xs bg-white p-2.5 rounded-lg border border-slate-100">
-                    <div><span class="text-slate-400">Slot:</span> <b class="text-slate-800">${b.slotNumber}</b></div>
-                    <div><span class="text-slate-400">Vehicle:</span> <b class="text-slate-800">${b.vehicleNumber}</b></div>
-                    <div><span class="text-slate-400">Duration:</span> <b class="text-slate-800">${b.duration} hrs</b></div>
-                    <div><span class="text-slate-400">Amount:</span> <b class="text-emerald-600">${b.totalPaid}</b></div>
+                <h4 class="font-bold text-sm text-slate-900 truncate" title="${b.spotName}">${b.spotName}</h4>
+                <p class="text-xs text-slate-500 mt-0.5 truncate">${b.area}</p>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-xs bg-white p-2.5 rounded-lg border border-slate-100 min-w-0">
+                    <div class="truncate"><span class="text-slate-400">Slot:</span> <b class="text-slate-800">${b.slotNumber}</b></div>
+                    <div class="truncate"><span class="text-slate-400">Vehicle:</span> <b class="text-slate-800">${b.vehicleNumber}</b></div>
+                    <div class="truncate"><span class="text-slate-400">Duration:</span> <b class="text-slate-800">${b.duration} hrs</b></div>
+                    <div class="truncate"><span class="text-slate-400">Amount:</span> <b class="text-emerald-600">${b.totalPaid}</b></div>
                 </div>
-                <div class="mt-3 flex gap-2">
-                    <button onclick='renderPass(${JSON.stringify(b)})' class="flex-1 py-1.5 bg-sky-600 text-white rounded text-xs font-semibold hover:bg-sky-700">
+                <div class="mt-3 flex items-center gap-2 w-full min-w-0">
+                    <button onclick='renderPass(${JSON.stringify(b)})' class="flex-1 min-w-0 py-1.5 px-2 bg-sky-600 text-white rounded text-xs font-semibold hover:bg-sky-700 truncate">
                         View QR Pass
                     </button>
-                    <button onclick='openRatingModalFromBooking(${JSON.stringify(b)})' class="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold flex items-center gap-1 shadow-sm transition-all" title="Rate this parking service">
+                    <button onclick='openRatingModalFromBooking(${JSON.stringify(b)})' class="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all flex-shrink-0" title="Rate this parking service">
                         <i data-lucide="star" class="w-3.5 h-3.5 fill-white"></i>
                         <span>Rate</span>
                     </button>
-                    <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}" target="_blank" class="px-3 py-1.5 bg-slate-200 text-slate-800 rounded text-xs font-semibold hover:bg-slate-300 flex items-center" title="Start Navigation">
+                    <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}" target="_blank" class="px-3 py-1.5 bg-slate-200 text-slate-800 rounded text-xs font-semibold hover:bg-slate-300 flex items-center justify-center flex-shrink-0" title="Start Navigation">
                         <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
                     </a>
                 </div>
@@ -2005,45 +2103,45 @@ function renderVerifiedReviews() {
         `).join('');
 
         return `
-            <div class="review-card-hover bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                <div>
+            <div class="review-card-hover bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between w-full max-w-full overflow-hidden min-w-0">
+                <div class="min-w-0">
                     <!-- Reviewer Header -->
-                    <div class="flex items-start justify-between gap-3 mb-3">
-                        <div class="flex items-center gap-2.5">
-                            <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-white font-bold text-xs flex items-center justify-center shadow-sm">
+                    <div class="flex items-start justify-between gap-3 mb-3 min-w-0">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-white font-bold text-xs flex items-center justify-center shadow-sm flex-shrink-0">
                                 ${rev.author.charAt(0)}
                             </div>
-                            <div>
-                                <div class="font-bold text-xs text-slate-900 leading-snug flex items-center gap-1.5">
-                                    <span>${rev.author}</span>
-                                    <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full">Verified</span>
+                            <div class="min-w-0">
+                                <div class="font-bold text-xs text-slate-900 leading-snug flex items-center gap-1.5 truncate">
+                                    <span class="truncate">${rev.author}</span>
+                                    <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full flex-shrink-0">Verified</span>
                                 </div>
-                                <div class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-                                    <span>${rev.vehicle}</span>
+                                <div class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 truncate">
+                                    <span class="truncate">${rev.vehicle}</span>
                                     <span>•</span>
-                                    <span>${rev.timeAgo}</span>
+                                    <span class="flex-shrink-0">${rev.timeAgo}</span>
                                 </div>
                             </div>
                         </div>
-                        <div class="flex items-center">
+                        <div class="flex items-center flex-shrink-0">
                             ${starsHtml}
                         </div>
                     </div>
 
                     <!-- Facility Name -->
-                    <div class="text-xs font-bold text-sky-800 flex items-center gap-1 mb-2">
+                    <div class="text-xs font-bold text-sky-800 flex items-center gap-1 mb-2 min-w-0">
                         <i data-lucide="map-pin" class="w-3 h-3 text-sky-600 flex-shrink-0"></i>
                         <span class="truncate">${rev.spotName}</span>
                     </div>
 
                     <!-- Review Comment -->
-                    <p class="text-xs text-slate-600 leading-relaxed italic mb-3">
+                    <p class="text-xs text-slate-600 leading-relaxed italic mb-3 break-words">
                         "${rev.comment}"
                     </p>
                 </div>
 
                 <!-- Feedback Tag Chips -->
-                <div class="pt-3 border-t border-slate-100 flex flex-wrap gap-1">
+                <div class="pt-3 border-t border-slate-100 flex flex-wrap gap-1 min-w-0">
                     ${tagsHtml}
                 </div>
             </div>
@@ -2052,3 +2150,717 @@ function renderVerifiedReviews() {
 
     lucide.createIcons();
 }
+
+// ===================================================================
+// Groq AI Parking Copilot Controller (Powered by Groq Cloud API)
+// ===================================================================
+
+let aiChatHistory = [];
+
+function openAiCopilotModal() {
+    const modal = document.getElementById('aiCopilotModal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    const groqKey = getActiveGroqKey();
+    const statusText = document.getElementById('groqStatusText');
+    const statusDot = document.getElementById('groqStatusDot');
+    const pingDot = document.getElementById('groqPingDot');
+    const modelBadge = document.getElementById('aiModelBadge');
+
+    const modelName = (window.ENV && window.ENV.GROQ_MODEL) || 'llama-3.3-70b-versatile';
+    if (modelBadge) modelBadge.innerText = modelName;
+
+    if (groqKey) {
+        statusText.innerHTML = `<b>Groq LPU Live:</b> Connected (${modelName})`;
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-emerald-500';
+        pingDot.classList.remove('hidden');
+    } else {
+        statusText.innerHTML = `Demo Mode • Add <code class="bg-amber-200/80 px-1 py-0.5 rounded font-mono">GROQ_API_KEY</code> in .env to activate live LLaMA`;
+        statusDot.className = 'relative inline-flex rounded-full h-2 w-2 bg-amber-500';
+        pingDot.classList.add('hidden');
+    }
+
+    lucide.createIcons();
+    setTimeout(() => {
+        const input = document.getElementById('aiChatInput');
+        if (input) input.focus();
+    }, 200);
+}
+
+function closeAiCopilotModal() {
+    const modal = document.getElementById('aiCopilotModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+function getActiveGroqKey() {
+    if (window.ENV && window.ENV.GROQ_API_KEY) {
+        const k = window.ENV.GROQ_API_KEY.trim();
+        if (k && k !== 'your_groq_api_key_here' && k !== '') return k;
+    }
+    const stored = localStorage.getItem('parkease_groq_key');
+    if (stored && stored.trim()) return stored.trim();
+    return null;
+}
+
+function sendQuickAiPrompt(text) {
+    const input = document.getElementById('aiChatInput');
+    if (input) {
+        input.value = text;
+        handleAiChatSubmit(new Event('submit'));
+    }
+}
+
+async function handleAiChatSubmit(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    const input = document.getElementById('aiChatInput');
+    const query = input.value.trim();
+    if (!query) return;
+
+    input.value = '';
+
+    // Append user message
+    appendChatMessage('user', query);
+
+    // Append typing indicator
+    const typingId = 'typing-' + Date.now();
+    appendTypingIndicator(typingId);
+
+    // Call Groq or localized assistant
+    const groqKey = getActiveGroqKey();
+    const model = (window.ENV && window.ENV.GROQ_MODEL) || 'llama-3.3-70b-versatile';
+
+    if (groqKey) {
+        try {
+            const systemContext = `You are "ParkEase AI Copilot", an expert urban parking assistant for Indian Tier-1 cities (Delhi NCR, Bengaluru, Mumbai, Pune, Hyderabad).
+Current city selected: ${currentCity}.
+Available spots summary: ${allSpots.slice(0, 8).map(s => `${s.name} in ${s.area} (₹${s.rates.fourWheeler}/hr, ${s.slots.available} free slots, EV:${s.slots.evAvailable > 0 ? 'Yes' : 'No'}, TowingSafe:${s.towingFreeGuaranteed ? 'Yes' : 'No'})`).join('; ')}.
+Answer crisply and concisely in 2-4 sentences with relevant prices, safety, or routes. Use helpful bullet points if needed. You understand English, Hindi, and Hinglish.`;
+
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${groqKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [
+                        { role: 'system', content: systemContext },
+                        ...aiChatHistory.slice(-4),
+                        { role: 'user', content: query }
+                    ],
+                    temperature: 0.6,
+                    max_tokens: 350
+                })
+            });
+
+            const data = await response.json();
+            removeTypingIndicator(typingId);
+
+            if (data.choices && data.choices[0] && data.choices[0].message) {
+                const aiReply = data.choices[0].message.content;
+                aiChatHistory.push({ role: 'user', content: query });
+                aiChatHistory.push({ role: 'assistant', content: aiReply });
+                appendChatMessage('bot', aiReply);
+            } else if (data.error) {
+                appendChatMessage('bot', `⚠️ Groq API Error: ${data.error.message || 'Authentication issue'}. Please verify your key in .env`);
+            }
+        } catch (err) {
+            console.warn("Groq API request error:", err);
+            removeTypingIndicator(typingId);
+            appendChatMessage('bot', getOfflineAiAnswer(query));
+        }
+    } else {
+        // Fallback intelligent response + key instruction
+        setTimeout(() => {
+            removeTypingIndicator(typingId);
+            appendChatMessage('bot', getOfflineAiAnswer(query));
+        }, 600);
+    }
+}
+
+function appendChatMessage(sender, text) {
+    const container = document.getElementById('aiChatMessages');
+    if (!container) return;
+
+    const isUser = sender === 'user';
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `flex items-start gap-2.5 ${isUser ? 'justify-end' : ''} animate-fade-in`;
+
+    // Format newlines and bold markdown
+    const formatted = text
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\n/g, '<br>');
+
+    if (isUser) {
+        msgDiv.innerHTML = `
+            <div class="p-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-2xl rounded-tr-sm shadow-sm max-w-[85%] leading-relaxed">
+                ${formatted}
+            </div>
+            <div class="w-8 h-8 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center flex-shrink-0 text-[11px] shadow-sm">
+                You
+            </div>
+        `;
+    } else {
+        msgDiv.innerHTML = `
+            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-orange-500 to-amber-500 text-white font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
+                <i data-lucide="bot" class="w-4 h-4"></i>
+            </div>
+            <div class="p-3 bg-white rounded-2xl rounded-tl-sm border border-slate-200 text-slate-800 shadow-sm max-w-[85%] leading-relaxed">
+                ${formatted}
+            </div>
+        `;
+    }
+
+    container.appendChild(msgDiv);
+    container.scrollTop = container.scrollHeight;
+    lucide.createIcons();
+}
+
+function appendTypingIndicator(id) {
+    const container = document.getElementById('aiChatMessages');
+    if (!container) return;
+
+    const div = document.createElement('div');
+    div.id = id;
+    div.className = 'flex items-start gap-2.5 animate-fade-in';
+    div.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-amber-500 text-white font-bold flex items-center justify-center flex-shrink-0 shadow-sm">
+            <i data-lucide="bot" class="w-4 h-4 animate-spin"></i>
+        </div>
+        <div class="p-3 bg-white rounded-2xl rounded-tl-sm border border-slate-200 text-slate-500 shadow-sm flex items-center gap-1.5 text-xs">
+            <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce"></span>
+            <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+            <span class="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+            <span class="ml-1 text-[11px] text-slate-400 font-mono">Groq LPU thinking...</span>
+        </div>
+    `;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    lucide.createIcons();
+}
+
+function removeTypingIndicator(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+function getOfflineAiAnswer(query) {
+    const q = query.toLowerCase();
+    let reply = "";
+
+    if (q.includes('ev') || q.includes('charg')) {
+        reply = `⚡ <b>EV Fast Charging Hubs:</b><br>
+        • <b>Cyber Hub Basement P2</b> (Gurugram) - 60kW DC Rapid Chargers<br>
+        • <b>Select Citywalk</b> (Saket, Delhi) - 30kW DC Fast Chargers<br>
+        • <b>Indiranagar 100ft Road</b> (Bengaluru) - 7.4kW AC & 30kW DC<br>
+        Rates are standard parking fare + ₹45-₹150 for power recharge.`;
+    } else if (q.includes('cheap') || q.includes('sasta') || q.includes('rate') || q.includes('price')) {
+        reply = `💰 <b>Most Affordable Parking Options:</b><br>
+        • <b>CP Block B Underground</b>: ₹40/hr (2-Wheeler: ₹20/hr, Day pass ₹250)<br>
+        • <b>Indiranagar Metro MLCP</b>: ₹40/hr with full day pass ₹220<br>
+        • Monthly corporate pass offers an instant <b>35% discount</b>!`;
+    } else if (q.includes('tow') || q.includes('challan') || q.includes('police') || q.includes('fine')) {
+        reply = `🚨 <b>Anti-Challan Warning:</b><br>
+        Street parking in CP Outer Circle, 100ft Road Indiranagar & BKC carries heavy towing squads:<br>
+        • Towing charge: ₹1,500<br>
+        • No-parking fine: ₹500<br>
+        • <b>Total penalty: ₹2,000</b>.<br>
+        Always use ParkEase verified covered hubs to guarantee zero towing.`;
+    } else if (q.includes('fastag') || q.includes('barrier') || q.includes('gate')) {
+        reply = `🤖 <b>FASTag & RFID Barrier Clearance:</b><br>
+        Our AI camera scans your license plate on approach. If you have an active ParkEase Smart Pass or FASTag RFID sticker, the boom barrier swings open in <b>1.5 seconds</b> without cash exchange.`;
+    } else {
+        reply = `🚗 Found multiple verified parking facilities in <b>${currentCity.toUpperCase()}</b>! All lots feature CCTV surveillance, 24/7 security guards, and guaranteed towing protection. You can book an instant slot with visual 2D floor plans from the home screen.`;
+    }
+
+    reply += `<br><br><span class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded block">💡 <b>Tip:</b> Add your <code>GROQ_API_KEY</code> in <b>.env</b> or <b>env.js</b> to unlock live conversational LLaMA-3.3 70B!</span>`;
+
+    return reply;
+}
+
+// ===================================================================
+// User Onboarding, Problem Resolution Tracker & CRM Controller
+// ===================================================================
+
+const DEFAULT_SAMPLE_LEADS = [
+    {
+        id: 'LEAD-101',
+        name: 'Amit Verma',
+        phone: '9871123456',
+        city: 'delhi',
+        vehicleNumber: 'DL 04 CA 7890',
+        vehicleType: 'fourWheeler',
+        status: 'Smooth',
+        issueDetail: 'No issues reported. Smooth booking at Cyber Hub.',
+        registeredAt: Date.now() - 86400000 * 2,
+        registeredDate: '2 days ago'
+    },
+    {
+        id: 'LEAD-102',
+        name: 'Priya Sharma',
+        phone: '9988765432',
+        city: 'bengaluru',
+        vehicleNumber: 'KA 03 MH 4321',
+        vehicleType: 'suv',
+        status: 'Reported Issue',
+        issueDetail: 'Delay in barrier scan at Indiranagar MLCP',
+        registeredAt: Date.now() - 86400000 * 1,
+        registeredDate: 'Yesterday'
+    },
+    {
+        id: 'LEAD-103',
+        name: 'Rohit Mehta',
+        phone: '9820011223',
+        city: 'mumbai',
+        vehicleNumber: 'MH 01 DE 9988',
+        vehicleType: 'ev',
+        status: 'Resolved',
+        issueDetail: 'Resolved: Guided to 60kW DC charger plug in BKC',
+        registeredAt: Date.now() - 3600000 * 4,
+        registeredDate: '4 hours ago'
+    }
+];
+
+function initUserProfileAndCrm() {
+    // 1. Seed default customer leads if not present
+    let leads = [];
+    try {
+        const storedLeads = localStorage.getItem('parkease_registered_leads');
+        if (!storedLeads) {
+            localStorage.setItem('parkease_registered_leads', JSON.stringify(DEFAULT_SAMPLE_LEADS));
+            leads = DEFAULT_SAMPLE_LEADS;
+        } else {
+            leads = JSON.parse(storedLeads);
+        }
+    } catch(e) {
+        leads = DEFAULT_SAMPLE_LEADS;
+    }
+
+    updateCrmBadge(leads.length);
+
+    // 2. Check if user already completed onboarding
+    let profile = null;
+    try {
+        profile = JSON.parse(localStorage.getItem('parkease_user_profile') || 'null');
+    } catch(e) {}
+
+    const profileNavText = document.getElementById('userProfileNavText');
+    const profileNavBtn = document.getElementById('userProfileNavBtn');
+
+    if (profile && profile.name) {
+        if (profileNavText) {
+            const firstName = profile.name.trim().split(' ')[0];
+            profileNavText.innerText = `👤 ${firstName}`;
+        }
+        if (profileNavBtn) {
+            profileNavBtn.title = `Profile: ${profile.name} (${profile.vehicleNumber})`;
+            profileNavBtn.classList.remove('bg-emerald-50', 'text-emerald-700', 'border-emerald-200');
+            profileNavBtn.classList.add('bg-slate-100', 'text-slate-800', 'border-slate-300');
+        }
+    } else {
+        // First-time user popup after 1.2s delay
+        setTimeout(() => {
+            openUserOnboardingModal();
+        }, 1200);
+    }
+}
+
+function updateCrmBadge(count) {
+    const badge = document.getElementById('crmUsersCountBadge');
+    if (badge) {
+        badge.innerText = count || 0;
+    }
+}
+
+function openUserOnboardingModal() {
+    const modal = document.getElementById('userOnboardingModal');
+    if (!modal) return;
+
+    // Prefill form if profile already exists
+    try {
+        const profile = JSON.parse(localStorage.getItem('parkease_user_profile') || 'null');
+        if (profile) {
+            if (document.getElementById('onboardNameInput')) document.getElementById('onboardNameInput').value = profile.name || '';
+            if (document.getElementById('onboardPhoneInput')) document.getElementById('onboardPhoneInput').value = profile.phone || '';
+            if (document.getElementById('onboardCitySelect')) document.getElementById('onboardCitySelect').value = profile.city || currentCity || 'delhi';
+            if (document.getElementById('onboardVehicleNoInput')) document.getElementById('onboardVehicleNoInput').value = profile.vehicleNumber || '';
+            if (document.getElementById('onboardVehicleTypeSelect')) document.getElementById('onboardVehicleTypeSelect').value = profile.vehicleType || currentVehicleType || 'fourWheeler';
+        }
+    } catch(e) {}
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    lucide.createIcons();
+}
+
+function closeUserOnboardingModal() {
+    const modal = document.getElementById('userOnboardingModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+function handleUserOnboardingSubmit(event) {
+    if (event && event.preventDefault) event.preventDefault();
+
+    const name = document.getElementById('onboardNameInput').value.trim();
+    const phoneRaw = document.getElementById('onboardPhoneInput').value.trim().replace(/[^0-9]/g, '');
+    const city = document.getElementById('onboardCitySelect').value;
+    const vehicleNumber = document.getElementById('onboardVehicleNoInput').value.trim().toUpperCase();
+    const vehicleType = document.getElementById('onboardVehicleTypeSelect').value;
+
+    if (!name) {
+        showToast("Please enter your name.", "error");
+        return;
+    }
+    if (phoneRaw.length < 10) {
+        showToast("Please enter a valid 10-digit mobile number.", "error");
+        return;
+    }
+    if (!vehicleNumber) {
+        showToast("Please enter your vehicle license plate.", "error");
+        return;
+    }
+
+    const cleanPhone = phoneRaw.slice(-10);
+
+    const userProfile = {
+        name: name,
+        phone: cleanPhone,
+        city: city,
+        vehicleNumber: vehicleNumber,
+        vehicleType: vehicleType,
+        discount: 50,
+        couponCode: 'PARK50',
+        registeredAt: Date.now()
+    };
+
+    // Save active profile
+    localStorage.setItem('parkease_user_profile', JSON.stringify(userProfile));
+
+    // Save lead into CRM registered leads
+    let leads = [];
+    try {
+        leads = JSON.parse(localStorage.getItem('parkease_registered_leads') || '[]');
+    } catch(e) {
+        leads = [];
+    }
+
+    // Check if lead already exists with same phone
+    const existingIndex = leads.findIndex(l => l.phone === cleanPhone);
+    const newLead = {
+        id: existingIndex >= 0 ? leads[existingIndex].id : 'LEAD-' + Date.now(),
+        name: name,
+        phone: cleanPhone,
+        city: city,
+        vehicleNumber: vehicleNumber,
+        vehicleType: vehicleType,
+        status: existingIndex >= 0 ? leads[existingIndex].status : 'Smooth',
+        issueDetail: existingIndex >= 0 ? leads[existingIndex].issueDetail : 'New Registration - Verified Driver',
+        registeredAt: Date.now(),
+        registeredDate: 'Just now'
+    };
+
+    if (existingIndex >= 0) {
+        leads[existingIndex] = newLead;
+    } else {
+        leads.unshift(newLead);
+    }
+
+    localStorage.setItem('parkease_registered_leads', JSON.stringify(leads));
+    updateCrmBadge(leads.length);
+
+    // Update UI badge
+    const profileNavText = document.getElementById('userProfileNavText');
+    const profileNavBtn = document.getElementById('userProfileNavBtn');
+    if (profileNavText) {
+        const firstName = name.split(' ')[0];
+        profileNavText.innerText = `👤 ${firstName}`;
+    }
+    if (profileNavBtn) {
+        profileNavBtn.title = `Profile: ${name} (${vehicleNumber})`;
+        profileNavBtn.classList.remove('bg-emerald-50', 'text-emerald-700', 'border-emerald-200');
+        profileNavBtn.classList.add('bg-slate-100', 'text-slate-800', 'border-slate-300');
+    }
+
+    // Pre-fill booking fields if open
+    const vehicleNumInput = document.getElementById('vehicleNumberInput');
+    if (vehicleNumInput && !vehicleNumInput.value) {
+        vehicleNumInput.value = vehicleNumber;
+    }
+
+    closeUserOnboardingModal();
+
+    // Play celebration chime
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.08);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime + i * 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.08 + 0.35);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(audioCtx.currentTime + i * 0.08);
+            osc.stop(audioCtx.currentTime + i * 0.08 + 0.35);
+        });
+    } catch(e) {}
+
+    showToast(`🎉 Welcome ${name}! ₹50 Discount Voucher PARK50 Activated.`, "success");
+}
+
+function openCrmModal() {
+    const modal = document.getElementById('crmModal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    renderCrmDashboard();
+    lucide.createIcons();
+}
+
+function closeCrmModal() {
+    const modal = document.getElementById('crmModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+function renderCrmDashboard(filterQuery = '') {
+    let leads = [];
+    try {
+        leads = JSON.parse(localStorage.getItem('parkease_registered_leads') || '[]');
+    } catch(e) {
+        leads = [];
+    }
+
+    let bookings = [];
+    try {
+        bookings = JSON.parse(localStorage.getItem('parkease_bookings') || '[]');
+    } catch(e) {}
+
+    // Update metrics
+    const metricUsers = document.getElementById('crmMetricTotalUsers');
+    if (metricUsers) metricUsers.innerText = leads.length;
+
+    const metricBookings = document.getElementById('crmMetricActiveBookings');
+    if (metricBookings) metricBookings.innerText = bookings.length;
+
+    // Filter leads
+    const q = filterQuery.toLowerCase().trim();
+    const filtered = leads.filter(l => {
+        if (!q) return true;
+        return (
+            (l.name && l.name.toLowerCase().includes(q)) ||
+            (l.phone && l.phone.includes(q)) ||
+            (l.vehicleNumber && l.vehicleNumber.toLowerCase().includes(q)) ||
+            (l.city && l.city.toLowerCase().includes(q)) ||
+            (l.status && l.status.toLowerCase().includes(q))
+        );
+    });
+
+    const container = document.getElementById('crmUsersListContainer');
+    if (!container) return;
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="py-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+                <i data-lucide="user-x" class="w-10 h-10 mx-auto text-slate-300 mb-2"></i>
+                <p class="font-bold text-slate-700">No matching users found</p>
+                <p class="text-xs text-slate-400 mt-1">Try searching by a different name, phone or vehicle plate.</p>
+            </div>
+        `;
+        lucide.createIcons();
+        return;
+    }
+
+    container.innerHTML = filtered.map(lead => {
+        const cleanPhone = (lead.phone || '').replace(/[^0-9]/g, '').slice(-10);
+        const cityLabel = (lead.city || 'Delhi').toUpperCase();
+        
+        // Status badge styling
+        let statusBadge = '';
+        if (lead.status === 'Reported Issue') {
+            statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
+                <i data-lucide="alert-circle" class="w-3 h-3 text-rose-600"></i> Issue Reported
+            </span>`;
+        } else if (lead.status === 'Resolved') {
+            statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200 flex items-center gap-1">
+                <i data-lucide="check-circle-2" class="w-3 h-3 text-sky-600"></i> Issue Resolved
+            </span>`;
+        } else {
+            statusBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <i data-lucide="check" class="w-3 h-3 text-emerald-600"></i> Smooth (No Issues)
+            </span>`;
+        }
+
+        // WhatsApp Problem Check-in Message
+        const problemMessage = `Hello ${lead.name}, this is Hemant from ParkEase Support team. We noticed you recently registered your vehicle (${lead.vehicleNumber}) on ParkEase in ${cityLabel}. Did you face any difficulty with parking slot booking, navigation, or gate entry? We are here to help and ensure a smooth experience!`;
+        const problemWaUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(problemMessage)}`;
+
+        // WhatsApp Promotional Offer Message
+        const offerMessage = `Hello ${lead.name}! 🎉 Special Offer from ParkEase: Use coupon code PARK50 to get ₹50 OFF on your next parking reservation for your vehicle ${lead.vehicleNumber} in ${cityLabel}. 100% CCTV-guarded slots, FASTag express clearance, and zero towing guarantee! Book now: ${window.location.href}`;
+        const offerWaUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(offerMessage)}`;
+
+        return `
+            <div class="p-4 bg-white rounded-2xl border border-slate-200 hover:border-purple-300 shadow-sm transition-all space-y-3">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-9 h-9 rounded-xl bg-purple-100 text-purple-800 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                            ${(lead.name || 'U').charAt(0)}
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                <span>${lead.name}</span>
+                                <span class="text-[10px] text-slate-400 font-mono">(${cityLabel})</span>
+                            </div>
+                            <div class="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 font-mono">
+                                <span>📞 +91 ${cleanPhone}</span>
+                                <span>•</span>
+                                <span class="bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[10px]">${lead.vehicleNumber}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        ${statusBadge}
+                        <button onclick="toggleLeadIssueStatus('${lead.id}')" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition-colors" title="Toggle Problem Status (Smooth / Issue / Resolved)">
+                            Toggle Status
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Issue Details / Notes -->
+                <div class="text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-start justify-between gap-2">
+                    <div class="flex-1">
+                        <span class="font-semibold text-slate-800">Support Log:</span>
+                        <span class="text-slate-600 ml-1">${lead.issueDetail || 'No problems reported'}</span>
+                    </div>
+                    <span class="text-[10px] text-slate-400 flex-shrink-0">${lead.registeredDate || 'Recently'}</span>
+                </div>
+
+                <!-- 1-Click WhatsApp Support & Offers Outreach Bar -->
+                <div class="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                    <a href="${problemWaUrl}" target="_blank" class="flex-1 min-w-[140px] py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all">
+                        <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+                        <span>Check Problem (WhatsApp)</span>
+                    </a>
+
+                    <a href="${offerWaUrl}" target="_blank" class="flex-1 min-w-[140px] py-1.5 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm shadow-purple-600/20 transition-all">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-300"></i>
+                        <span>Send ₹50 Offer</span>
+                    </a>
+
+                    <button onclick="deleteCrmLead('${lead.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Remove customer from list">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    lucide.createIcons();
+}
+
+function filterCrmUsers() {
+    const input = document.getElementById('crmSearchInput');
+    const query = input ? input.value : '';
+    renderCrmDashboard(query);
+}
+
+function toggleLeadIssueStatus(leadId) {
+    let leads = [];
+    try {
+        leads = JSON.parse(localStorage.getItem('parkease_registered_leads') || '[]');
+    } catch(e) {
+        leads = [];
+    }
+
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    if (lead.status === 'Smooth' || !lead.status) {
+        lead.status = 'Reported Issue';
+        lead.issueDetail = prompt("Enter problem description (e.g. barrier scan issue, slot occupied, payment difficulty):") || "User reported an issue during check-in.";
+    } else if (lead.status === 'Reported Issue') {
+        lead.status = 'Resolved';
+        lead.issueDetail = "Support team contacted user via WhatsApp. Issue resolved.";
+    } else {
+        lead.status = 'Smooth';
+        lead.issueDetail = "Service running normally without issues.";
+    }
+
+    localStorage.setItem('parkease_registered_leads', JSON.stringify(leads));
+    filterCrmUsers();
+    showToast(`Status updated to: ${lead.status}`, "info");
+}
+
+function deleteCrmLead(leadId) {
+    if (!confirm("Are you sure you want to remove this user from the CRM?")) return;
+
+    let leads = [];
+    try {
+        leads = JSON.parse(localStorage.getItem('parkease_registered_leads') || '[]');
+    } catch(e) {
+        leads = [];
+    }
+
+    leads = leads.filter(l => l.id !== leadId);
+    localStorage.setItem('parkease_registered_leads', JSON.stringify(leads));
+    updateCrmBadge(leads.length);
+    filterCrmUsers();
+    showToast("User removed from list.", "info");
+}
+
+function exportUsersToCSV() {
+    let leads = [];
+    try {
+        leads = JSON.parse(localStorage.getItem('parkease_registered_leads') || '[]');
+    } catch(e) {
+        leads = [];
+    }
+
+    if (leads.length === 0) {
+        showToast("No registered users to export.", "error");
+        return;
+    }
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Lead ID,Name,Phone,City,Vehicle Number,Vehicle Type,Status,Issue Description,Registration Date\n";
+
+    leads.forEach(l => {
+        const row = [
+            `"${l.id || ''}"`,
+            `"${(l.name || '').replace(/"/g, '""')}"`,
+            `"'+91${l.phone || ''}"`,
+            `"${l.city || ''}"`,
+            `"${l.vehicleNumber || ''}"`,
+            `"${l.vehicleType || ''}"`,
+            `"${l.status || ''}"`,
+            `"${(l.issueDetail || '').replace(/"/g, '""')}"`,
+            `"${l.registeredDate || ''}"`
+        ].join(",");
+        csvContent += row + "\n";
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `parkease_customers_leads_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast("📁 Exported leads to CSV file successfully!", "success");
+}
+

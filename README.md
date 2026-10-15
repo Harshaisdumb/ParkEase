@@ -84,6 +84,30 @@ Designed specifically to eliminate the biggest urban commute bottlenecks across 
 
 ---
 
+## 🔑 How to Add & Use Your API Keys (.env & env.js)
+
+### 1. ⚡ Groq Cloud API Key (`GROQ_API_KEY`)
+Powers the **ParkEase AI Copilot** (lightning-fast LLaMA-3.3 70B inference at ~500 tokens/sec).
+1. Get a free API key at [Groq Console](https://console.groq.com/keys).
+2. Open [`.env`](file:///C:/Users/Hemant/.gemini/antigravity/scratch/parkease/.env) and paste:
+   ```env
+   GROQ_API_KEY=gsk_your_groq_api_key_here
+   GROQ_MODEL=llama-3.3-70b-versatile
+   ```
+3. Or open [`env.js`](file:///C:/Users/Hemant/.gemini/antigravity/scratch/parkease/env.js) and paste directly in `window.ENV.GROQ_API_KEY`.
+4. Click the **"✨ AI Copilot"** button in the top navigation bar to chat with the AI assistant!
+
+### 2. 🗺️ Google Maps JavaScript API Key (`GOOGLE_MAPS_API_KEY`)
+*(Optional: OpenStreetMap + Leaflet works 100% free out-of-the-box)*
+1. Open [`.env`](file:///C:/Users/Hemant/.gemini/antigravity/scratch/parkease/.env) and paste:
+   ```env
+   GOOGLE_MAPS_API_KEY=AIzaSyYourActualKeyHere
+   MAP_ENGINE=google
+   ```
+2. Double click `run.bat` — it automatically syncs your keys from `.env` to `env.js` and launches the website!
+
+---
+
 ## 🚀 How to Run the Website
 
 Simply double click `run.bat` or `index.html` or open it in any modern browser (Chrome, Edge, Firefox, Brave, Safari).
@@ -100,10 +124,12 @@ C:\Users\Hemant\.gemini\antigravity\scratch\parkease\
 All code files are kept cleanly in one single folder without complex subdirectories:
 ```
 parkease/
+├── .env                # Standard environment variables for API keys
+├── env.js              # Browser-ready environment config for double-click execution
 ├── index.html          # Responsive UI, floor plan grid, ANPR gate, towing radar & modals
 ├── style.css           # Visual floor layout, boom barrier animation, radar ring & badges
 ├── data.js             # Realistic parking dataset across Delhi NCR, Mumbai, BLR, Pune, Hyd
 ├── app.js              # Core controller, Leaflet/Google Maps, OSRM route, speech & booking
-├── run.bat             # 1-Click launcher to open the project immediately
+├── run.bat             # 1-Click launcher (auto-syncs .env to env.js & opens browser)
 └── README.md           # Complete documentation & features guide
 ```

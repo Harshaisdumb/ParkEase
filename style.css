@@ -114,6 +114,67 @@ body {
     100% { transform: scale(2.2); opacity: 0; }
 }
 
+/* ===================================================================
+   Universal Box & Container Protection System
+   Ensures all cards, modals, drawers, and buttons stay strictly contained
+=================================================================== */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+img, svg, video, canvas, audio, iframe, embed, object {
+    max-width: 100%;
+}
+
+button, input, select, textarea {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Spot Card & General Card Strict Containment */
+.spot-card {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    position: relative;
+}
+.spot-card * {
+    box-sizing: border-box;
+}
+
+/* Review Cards & Pass Ticket Containment */
+.review-card-hover,
+.ticket-wrapper {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Universal modal dialogue box safety */
+.modal-box-safe {
+    box-sizing: border-box !important;
+    max-width: min(100%, calc(100vw - 2rem)) !important;
+    overflow: hidden !important;
+}
+
+/* Universal text wrap and flex sizing safety across all containers */
+.spot-card,
+.review-card-hover,
+.ticket-wrapper,
+.modal-box-safe {
+    overflow-wrap: break-word;
+}
+
+.spot-card button.flex-1,
+.modal-box-safe button.flex-1,
+.review-card-hover button.flex-1 {
+    flex-shrink: 1;
+    min-width: 0;
+}
+
 /* Badge tags */
 .badge-tag {
     display: inline-flex;
