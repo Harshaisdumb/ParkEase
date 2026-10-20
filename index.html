@@ -693,9 +693,22 @@
             <!-- Pass Middle QR Code -->
             <div class="p-6 text-center">
                 
-                <!-- Simulated QR Container -->
-                <div class="w-40 h-40 mx-auto bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-3 relative shadow-inner">
-                    <svg viewBox="0 0 100 100" class="w-28 h-28 text-slate-900 fill-current">
+                <!-- Dynamic Validity & Countdown Timer Header -->
+                <div id="passValidityBanner" class="mb-3 px-3 py-2 rounded-2xl border flex items-center justify-between text-xs font-bold transition-all bg-emerald-50 border-emerald-200 text-emerald-900">
+                    <span class="flex items-center gap-1.5">
+                        <span id="passStatusDot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span id="passStatusLabel">ACTIVE QR PASS</span>
+                    </span>
+                    <span id="passTimerBadge" class="font-mono text-emerald-800 bg-white px-2 py-0.5 rounded-lg border border-emerald-200 shadow-sm flex items-center gap-1">
+                        <i data-lucide="clock" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        <span id="passCountdownText">01:59:59</span>
+                    </span>
+                </div>
+
+                <!-- Simulated QR Container with Laser Scan & Expired Overlay -->
+                <div id="passQrContainer" class="w-44 h-44 mx-auto bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-3 relative shadow-inner overflow-hidden">
+                    <div id="qrScanBeam" class="qr-scan-line"></div>
+                    <svg id="passQrSvg" viewBox="0 0 100 100" class="w-28 h-28 text-slate-900 fill-current transition-opacity duration-300">
                         <rect x="10" y="10" width="20" height="20" />
                         <rect x="70" y="10" width="20" height="20" />
                         <rect x="10" y="70" width="20" height="20" />
@@ -710,7 +723,16 @@
                         <rect x="20" y="40" width="6" height="6" />
                         <rect x="50" y="75" width="12" height="6" />
                     </svg>
-                    <div class="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Scan at Boom Barrier</div>
+                    <div id="passQrSubtext" class="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Scan at Boom Barrier</div>
+
+                    <!-- Expired / Completed Watermark Overlay -->
+                    <div id="passQrExpiredOverlay" class="hidden absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center text-white p-3 z-10 animate-fade-in">
+                        <div class="w-10 h-10 rounded-full bg-rose-500/20 border border-rose-500/50 flex items-center justify-center mb-1 text-rose-400">
+                            <i data-lucide="shield-alert" class="w-5 h-5"></i>
+                        </div>
+                        <span class="text-xs font-black tracking-widest text-rose-300 uppercase">PASS EXPIRED</span>
+                        <span class="text-[10px] text-slate-300 mt-0.5 text-center leading-tight">Session Ended • Gate Re-entry Disabled</span>
+                    </div>
                 </div>
 
                 <div class="mt-4 space-y-1.5 text-xs text-left bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -743,13 +765,36 @@
                     </button>
                 </div>
 
-                <!-- Rate Experience After Parking Completion -->
+                <!-- Post-Parking Rating Section (Locked during Active QR, Unlocked once Expired / Completed) -->
                 <div class="mt-3 pt-3 border-t border-slate-100 no-print">
-                    <button onclick="openRatingModalFromCurrentPass()" class="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 transition-all">
-                        <i data-lucide="star" class="w-4 h-4 fill-white text-white"></i>
-                        <span>Finish Parking & Rate Service</span>
-                    </button>
-                    <p class="text-[10px] text-slate-400 text-center mt-1">Rate cleanliness, barrier speed & security guard</p>
+                    <!-- Locked State (While parking session is active) -->
+                    <div id="passReviewLockedState" class="space-y-2">
+                        <div class="p-3 bg-amber-50/80 rounded-2xl border border-amber-200/90 text-center">
+                            <div class="flex items-center justify-center gap-1.5 text-xs font-bold text-amber-900">
+                                <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-600"></i>
+                                <span>Review Unlocks After Parking Ends</span>
+                            </div>
+                            <p class="text-[11px] text-amber-700 mt-1 leading-relaxed">
+                                Review option becomes active after your parking duration expires or once you exit the facility.
+                            </p>
+                        </div>
+                        <button onclick="completeActiveParkingEarly()" class="w-full py-2.5 px-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all">
+                            <i data-lucide="log-out" class="w-3.5 h-3.5 text-amber-400"></i>
+                            <span>Exit Parking & Submit Review Now</span>
+                        </button>
+                    </div>
+
+                    <!-- Unlocked State (When session expired or completed) -->
+                    <div id="passReviewUnlockedState" class="hidden space-y-2 animate-fade-in">
+                        <div class="p-2.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-center text-[11px] text-emerald-800 font-semibold flex items-center justify-center gap-1.5">
+                            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+                            <span>Parking Session Completed • Thank you for choosing ParkEase!</span>
+                        </div>
+                        <button onclick="openRatingModalFromCurrentPass()" class="w-full py-3 px-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition-all animate-pulse">
+                            <i data-lucide="star" class="w-4 h-4 fill-white text-white"></i>
+                            <span>⭐ Rate Your Completed Parking Experience</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

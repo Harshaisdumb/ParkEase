@@ -640,3 +640,75 @@ button, input, select, textarea {
     box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.08);
 }
 
+/* QR Code Laser Scan Animation */
+.qr-scan-line {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #0ea5e9, #38bdf8, #0ea5e9, transparent);
+    box-shadow: 0 0 12px #38bdf8;
+    animation: qrScanMotion 2.2s ease-in-out infinite alternate;
+    pointer-events: none;
+    z-index: 5;
+}
+
+@keyframes qrScanMotion {
+    0% {
+        top: 12px;
+        opacity: 0.2;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        top: calc(100% - 14px);
+        opacity: 0.2;
+    }
+}
+
+/* User GPS Pulse Beacon Marker */
+.user-gps-beacon {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.user-gps-beacon .beacon-pulse {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: rgba(14, 165, 233, 0.35);
+    animation: beaconPulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.user-gps-beacon .beacon-core {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #0284c7;
+    border: 3px solid #ffffff;
+    box-shadow: 0 4px 10px rgba(2, 132, 199, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+
+@keyframes beaconPulse {
+    0% {
+        transform: scale(0.6);
+        opacity: 0.9;
+    }
+    100% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
+}
+
+

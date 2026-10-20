@@ -263,14 +263,20 @@ function renderSpots() {
 
     let cardsHTML = '';
 
-    filteredSpots.forEach(spot => {
+    filteredSpots.forEach((spot, idx) => {
         // Distance calculation
         let distanceText = '';
+        let nearestBadge = '';
         if (userCoords) {
             const dist = calculateDistance(userCoords.lat, userCoords.lng, spot.lat, spot.lng);
             distanceText = `<span class="inline-flex items-center text-xs font-medium text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">
                 <i data-lucide="navigation" class="w-3 h-3 mr-1 inline"></i>${dist.toFixed(1)} km away
             </span>`;
+            if (idx === 0) {
+                nearestBadge = `<span class="inline-flex items-center text-[10px] font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full shadow-xs">
+                    <i data-lucide="sparkles" class="w-3 h-3 text-emerald-600 mr-1"></i>NEAREST TO YOU
+                </span>`;
+            }
         }
 
         const availRatio = spot.slots.available / spot.slots.total;
@@ -412,6 +418,7 @@ function renderSpots() {
                                 ${spot.fastagEnabled ? '<span class="badge-tag badge-fastag"><i data-lucide="zap" class="w-3 h-3"></i>FASTag Auto</span>' : ''}
                                 ${spot.slots.evAvailable > 0 ? `<span class="badge-tag badge-ev"><i data-lucide="battery-charging" class="w-3 h-3"></i>${spot.slots.evAvailable} EV Ports</span>` : ''}
                                 ${spot.towingFreeGuaranteed ? '<span class="badge-tag badge-towing"><i data-lucide="shield-check" class="w-3 h-3"></i>Tow-Free Zone</span>' : ''}
+                                ${nearestBadge}
                                 ${distanceText}
                             </div>
                         </div>
@@ -919,73 +926,146 @@ function focusSpotCard(spotId) {
     }
 }
 
-// GPS Location Request
-function requestUserLocation() {
+let userLocationMarker = null;
+
+// GPS Location Request with High Accuracy and Automatic IP Geolocation Fallback
+async function requestUserLocation() {
     const btn = document.getElementById('locateMeBtn');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin mr-1"></i> Detecting...`;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin text-sky-600"></i> <span class="hidden md:inline">Locating...</span>`;
     lucide.createIcons();
 
-    if (!navigator.geolocation) {
-        showToast("Geolocation is not supported by your browser.", "error");
-        btn.innerHTML = originalText;
-        return;
+    function onLocationFound(lat, lng, sourceLabel = 'GPS') {
+        userCoords = { lat, lng };
+
+        // 1. Determine closest city
+        let closestCityKey = 'delhi';
+        let minCityDist = Infinity;
+        Object.keys(CITIES_DATA).forEach(cityKey => {
+            const city = CITIES_DATA[cityKey];
+            const d = calculateDistance(lat, lng, city.center[0], city.center[1]);
+            if (d < minCityDist) {
+                minCityDist = d;
+                closestCityKey = cityKey;
+            }
+        });
+
+        // If user is within 70km of a known city, set to that city; otherwise 'all'
+        if (minCityDist <= 70) {
+            currentCity = closestCityKey;
+        } else {
+            currentCity = 'all';
+        }
+        const citySelect = document.getElementById('citySelect');
+        if (citySelect) citySelect.value = currentCity;
+
+        // 2. Map marker
+        if (activeMapEngine === 'osm' && map) {
+            if (userLocationMarker) {
+                try { map.removeLayer(userLocationMarker); } catch(e) {}
+            }
+            const userIcon = L.divIcon({
+                className: 'user-gps-container',
+                html: `
+                    <div class="user-gps-beacon">
+                        <div class="beacon-pulse"></div>
+                        <div class="beacon-core">
+                            <span style="font-size: 10px;">📍</span>
+                        </div>
+                    </div>
+                `,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18]
+            });
+
+            userLocationMarker = L.marker([lat, lng], { icon: userIcon, zIndexOffset: 1000 })
+                .addTo(map)
+                .bindPopup(`<div class="text-xs font-bold text-slate-900 p-1">📍 You Are Here (${sourceLabel})<br><span class="text-slate-500 font-normal">Sorted nearest parking spots</span></div>`)
+                .openPopup();
+
+            map.flyTo([lat, lng], 13, { animate: true, duration: 1.2 });
+        } else if (activeMapEngine === 'google' && googleMap && window.google) {
+            if (userLocationMarker && userLocationMarker.setMap) {
+                userLocationMarker.setMap(null);
+            }
+            userLocationMarker = new google.maps.Marker({
+                position: { lat, lng },
+                map: googleMap,
+                title: `You Are Here (${sourceLabel})`,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 10,
+                    fillColor: '#0284c7',
+                    fillOpacity: 1,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 3
+                },
+                zIndex: 999
+            });
+            googleMap.panTo({ lat, lng });
+            googleMap.setZoom(13);
+        }
+
+        // 3. Set sorting to distance (Nearest First)
+        const sortSelect = document.getElementById('sortSelect');
+        if (sortSelect) sortSelect.value = 'dist';
+
+        // 4. Render spots & stats
+        renderSpots();
+        renderCityStats();
+
+        // 5. Update UI button
+        btn.innerHTML = `<i data-lucide="map-pin" class="w-4 h-4 text-emerald-600"></i> <span class="hidden md:inline">Located</span>`;
+        btn.classList.add('border-emerald-300', 'bg-emerald-50', 'text-emerald-800');
+        btn.classList.remove('border-slate-200');
+        lucide.createIcons();
+
+        showToast(`📍 Located at [${lat.toFixed(3)}, ${lng.toFixed(3)}]! Showing nearest parking.`, "success");
     }
 
-    navigator.geolocation.getCurrentPosition(
-        (position) => {
-            userCoords = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude
-            };
+    // Try HTML5 Geolocation with fallback to free IP Geolocation
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                onLocationFound(pos.coords.latitude, pos.coords.longitude, "Device GPS");
+            },
+            async (err) => {
+                console.warn("Browser GPS unavailable/denied:", err.message, "Trying IP Geolocation fallback...");
+                const ipSuccess = await tryIpGeolocation(onLocationFound);
+                if (!ipSuccess) {
+                    btn.innerHTML = originalHtml;
+                    lucide.createIcons();
+                    showToast("GPS permission denied or unavailable. Please choose your city from the dropdown.", "info");
+                }
+            },
+            { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+        );
+    } else {
+        const ipSuccess = await tryIpGeolocation(onLocationFound);
+        if (!ipSuccess) {
+            btn.innerHTML = originalHtml;
+            lucide.createIcons();
+            showToast("Geolocation is not supported by your browser.", "error");
+        }
+    }
+}
 
-            if (activeMapEngine === 'osm' && map) {
-                const userIcon = L.divIcon({
-                    className: 'user-location-marker',
-                    html: `<div class="w-6 h-6 rounded-full bg-blue-600 border-2 border-white shadow-lg flex items-center justify-center animate-bounce">
-                        <div class="w-2.5 h-2.5 bg-white rounded-full"></div>
-                    </div>`,
-                    iconSize: [24, 24]
-                });
-
-                L.marker([userCoords.lat, userCoords.lng], { icon: userIcon })
-                    .addTo(map)
-                    .bindPopup("<b>You are here!</b><br>Showing nearest parking spaces.")
-                    .openPopup();
-
-                map.flyTo([userCoords.lat, userCoords.lng], 14, { animate: true, duration: 1.2 });
-            } else if (activeMapEngine === 'google' && googleMap && window.google) {
-                new google.maps.Marker({
-                    position: userCoords,
-                    map: googleMap,
-                    title: "You are here",
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 8,
-                        fillColor: '#2563eb',
-                        fillOpacity: 1,
-                        strokeColor: '#ffffff',
-                        strokeWeight: 2
-                    }
-                });
-                googleMap.panTo(userCoords);
-                googleMap.setZoom(14);
+async function tryIpGeolocation(successCallback) {
+    try {
+        const response = await fetch('https://get.geojs.io/v1/ip/geo.json');
+        if (response.ok) {
+            const data = await response.json();
+            const lat = parseFloat(data.latitude);
+            const lng = parseFloat(data.longitude);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                successCallback(lat, lng, data.city ? `${data.city} (Network IP)` : "Network IP");
+                return true;
             }
-
-            document.getElementById('sortSelect').value = 'dist';
-            renderSpots();
-            showToast("GPS Location active! Showing nearest parking spots.", "success");
-            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 mr-1 text-emerald-500"></i> Located`;
-            lucide.createIcons();
-        },
-        (error) => {
-            console.warn("GPS error:", error);
-            showToast("Location permission denied. You can pick your city from the dropdown.", "info");
-            btn.innerHTML = originalText;
-            lucide.createIcons();
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-    );
+        }
+    } catch(e) {
+        console.warn("IP Geolocation failed:", e);
+    }
+    return false;
 }
 
 function resetFilters() {
@@ -1288,7 +1368,7 @@ function runBarrierSimulation() {
 
     document.getElementById('simPlateReadout').innerText = plate;
     btn.disabled = true;
-    log.innerHTML = `<span class="text-sky-600 font-bold">Scanning license plate via Optical AI Camera...</span>`;
+    log.innerHTML = `<span class="text-sky-600 font-bold">Scanning plate via ANPR AI Camera & checking QR pass validity...</span>`;
 
     // Play subtle audio beep via Web Audio API
     try {
@@ -1305,22 +1385,42 @@ function runBarrierSimulation() {
     } catch(e) {}
 
     setTimeout(() => {
-        // Plate recognized & barrier raised
-        pole.classList.add('barrier-open');
-        badge.className = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full';
-        badge.innerText = 'GATE OPEN - PROCEED';
-        log.innerHTML = `🟢 <b class="text-emerald-600">FASTag & Pass Verified!</b> Boom barrier raised. Welcome, vehicle <b>${plate}</b>!`;
+        // Check if vehicle has an active or expired reservation
+        let bookings = [];
+        try {
+            bookings = JSON.parse(localStorage.getItem('parkease_bookings') || '[]');
+        } catch(e) {}
 
-        showToast(`Boom Barrier Opened for ${plate}!`, "success");
+        const cleanScanPlate = plate.replace(/\s+/g, '');
+        const matchingBooking = bookings.find(b => b.vehicleNumber && b.vehicleNumber.replace(/\s+/g, '') === cleanScanPlate);
+        const isExpired = matchingBooking && (matchingBooking.status === 'Completed' || (matchingBooking.expiresAt && Date.now() >= matchingBooking.expiresAt));
 
-        // Auto close after 4 seconds
-        setTimeout(() => {
+        if (isExpired) {
+            // Expired Pass - Gate Access Denied
             pole.classList.remove('barrier-open');
             badge.className = 'bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full';
-            badge.innerText = 'GATE CLOSED';
-            log.innerHTML = `Gate reset to secured closed position. Vehicle entered successfully.`;
+            badge.innerText = 'ACCESS DENIED - PASS EXPIRED';
+            log.innerHTML = `⚠️ <b class="text-rose-600">QR Pass Expired!</b> Entry denied for vehicle <b>${plate}</b>. Parking duration has elapsed. Please renew booking.`;
+            showToast(`Access Denied: QR Pass for ${plate} is Expired!`, "error");
             btn.disabled = false;
-        }, 4000);
+        } else {
+            // Valid active pass or demo visitor
+            pole.classList.add('barrier-open');
+            badge.className = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full';
+            badge.innerText = 'GATE OPEN - PROCEED';
+            log.innerHTML = `🟢 <b class="text-emerald-600">Active QR Pass & FASTag Verified!</b> Boom barrier raised. Welcome, vehicle <b>${plate}</b>!`;
+
+            showToast(`Boom Barrier Opened for ${plate}!`, "success");
+
+            // Auto close after 4 seconds
+            setTimeout(() => {
+                pole.classList.remove('barrier-open');
+                badge.className = 'bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full';
+                badge.innerText = 'GATE CLOSED';
+                log.innerHTML = `Gate reset to secured closed position. Vehicle entered successfully.`;
+                btn.disabled = false;
+            }, 4000);
+        }
     }, 1200);
 }
 
@@ -1467,6 +1567,7 @@ function confirmBooking(event) {
         return;
     }
 
+    const durationHours = currentPassMode === 'monthly' ? (30 * 24) : (parseFloat(document.getElementById('bookingDuration').value) || 2);
     const durationText = currentPassMode === 'monthly' ? '30 Days (Monthly Pass)' : `${document.getElementById('bookingDuration').value} Hours`;
     const vType = document.getElementById('modalVehicleSelect').value;
     const totalAmount = document.getElementById('fareTotalAmount').innerText;
@@ -1474,6 +1575,8 @@ function confirmBooking(event) {
 
     const bookingId = (currentPassMode === 'monthly' ? 'MP-' : 'PK-') + Math.floor(100000 + Math.random() * 900000);
     const bookingTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    const now = Date.now();
+    const expiresAt = now + Math.round(durationHours * 3600 * 1000);
 
     const newBooking = {
         id: bookingId,
@@ -1486,11 +1589,13 @@ function confirmBooking(event) {
         vehicleType: vType,
         slotNumber: currentSelectedSlot.name,
         duration: durationText,
+        durationHours: durationHours,
         totalPaid: totalAmount,
         paymentMethod: paymentMethod,
         timestamp: bookingTime,
         status: 'Active',
-        createdAt: Date.now()
+        createdAt: now,
+        expiresAt: expiresAt
     };
 
     lastActiveBooking = newBooking;
@@ -1503,6 +1608,8 @@ function confirmBooking(event) {
     renderPass(newBooking);
     showToast("Parking Slot Confirmed! Your smart pass has been generated.", "success");
 }
+
+let passCountdownInterval = null;
 
 function renderPass(booking) {
     lastActiveBooking = booking;
@@ -1519,13 +1626,191 @@ function renderPass(booking) {
     const navBtn = document.getElementById('passGoogleMapsBtn');
     navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${booking.lat},${booking.lng}`;
 
+    // Setup validity countdown and review unlock state
+    updatePassValidityState(booking);
+
     const passModal = document.getElementById('passModal');
     passModal.classList.remove('hidden');
     passModal.classList.add('flex');
     lucide.createIcons();
 }
 
+function updatePassValidityState(booking) {
+    if (passCountdownInterval) {
+        clearInterval(passCountdownInterval);
+        passCountdownInterval = null;
+    }
+
+    const now = Date.now();
+    if (!booking.expiresAt && booking.createdAt) {
+        booking.expiresAt = booking.createdAt + (2 * 3600 * 1000);
+    }
+    const isExpired = booking.status === 'Completed' || (booking.expiresAt && now >= booking.expiresAt);
+
+    const banner = document.getElementById('passValidityBanner');
+    const statusDot = document.getElementById('passStatusDot');
+    const statusLabel = document.getElementById('passStatusLabel');
+    const timerBadge = document.getElementById('passTimerBadge');
+    const countdownText = document.getElementById('passCountdownText');
+    const qrScanBeam = document.getElementById('qrScanBeam');
+    const qrOverlay = document.getElementById('passQrExpiredOverlay');
+    const qrSvg = document.getElementById('passQrSvg');
+    const reviewLocked = document.getElementById('passReviewLockedState');
+    const reviewUnlocked = document.getElementById('passReviewUnlockedState');
+
+    if (isExpired) {
+        // Expired State
+        if (booking.status !== 'Completed') {
+            booking.status = 'Completed';
+            updateStoredBooking(booking);
+        }
+
+        if (banner) {
+            banner.className = 'mb-3 px-3 py-2 rounded-2xl border flex items-center justify-between text-xs font-bold transition-all bg-rose-50 border-rose-200 text-rose-900';
+        }
+        if (statusDot) {
+            statusDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+        }
+        if (statusLabel) {
+            statusLabel.innerText = 'PASS EXPIRED';
+        }
+        if (timerBadge) {
+            timerBadge.className = 'font-mono text-rose-800 bg-white px-2 py-0.5 rounded-lg border border-rose-200 shadow-sm flex items-center gap-1';
+        }
+        if (countdownText) {
+            countdownText.innerText = '00:00:00 (Completed)';
+        }
+        if (qrScanBeam) qrScanBeam.classList.add('hidden');
+        if (qrOverlay) qrOverlay.classList.remove('hidden');
+        if (qrSvg) qrSvg.style.opacity = '0.15';
+
+        // Unlock review only after expiration / session completion
+        if (reviewLocked) reviewLocked.classList.add('hidden');
+        if (reviewUnlocked) reviewUnlocked.classList.remove('hidden');
+    } else {
+        // Active State
+        if (banner) {
+            banner.className = 'mb-3 px-3 py-2 rounded-2xl border flex items-center justify-between text-xs font-bold transition-all bg-emerald-50 border-emerald-200 text-emerald-900';
+        }
+        if (statusDot) {
+            statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+        }
+        if (statusLabel) {
+            statusLabel.innerText = 'ACTIVE QR PASS';
+        }
+        if (timerBadge) {
+            timerBadge.className = 'font-mono text-emerald-800 bg-white px-2 py-0.5 rounded-lg border border-emerald-200 shadow-sm flex items-center gap-1';
+        }
+        if (qrScanBeam) qrScanBeam.classList.remove('hidden');
+        if (qrOverlay) qrOverlay.classList.add('hidden');
+        if (qrSvg) qrSvg.style.opacity = '1';
+
+        // Lock review while active
+        if (reviewLocked) reviewLocked.classList.remove('hidden');
+        if (reviewUnlocked) reviewUnlocked.classList.add('hidden');
+
+        // Start countdown timer ticking every second
+        function tick() {
+            const currentNow = Date.now();
+            const remainingMs = (booking.expiresAt || 0) - currentNow;
+
+            if (remainingMs <= 0) {
+                clearInterval(passCountdownInterval);
+                passCountdownInterval = null;
+                booking.status = 'Completed';
+                updateStoredBooking(booking);
+                updatePassValidityState(booking);
+                showToast("⏳ Parking session ended! QR expired. You can now rate your parking service ⭐", "info");
+                lucide.createIcons();
+            } else {
+                const totalSec = Math.floor(remainingMs / 1000);
+                const hrs = Math.floor(totalSec / 3600);
+                const mins = Math.floor((totalSec % 3600) / 60);
+                const secs = totalSec % 60;
+                const timeStr = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                if (countdownText) countdownText.innerText = timeStr;
+            }
+        }
+
+        tick();
+        passCountdownInterval = setInterval(tick, 1000);
+    }
+}
+
+function completeActiveParkingEarly(targetBooking = null, notifyUser = true) {
+    const booking = targetBooking || lastActiveBooking;
+    if (!booking) return;
+
+    booking.status = 'Completed';
+    booking.expiresAt = Date.now();
+    updateStoredBooking(booking);
+
+    if (passCountdownInterval) {
+        clearInterval(passCountdownInterval);
+        passCountdownInterval = null;
+    }
+
+    updatePassValidityState(booking);
+    loadExistingBookings();
+
+    if (notifyUser) {
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.35);
+        } catch(e) {}
+
+        showToast("✅ Parking session ended! QR Code Expired. Please rate your experience ⭐", "success");
+    }
+    lucide.createIcons();
+}
+
+function updateStoredBooking(updatedBooking) {
+    try {
+        let bookings = JSON.parse(localStorage.getItem('parkease_bookings') || '[]');
+        const idx = bookings.findIndex(b => b.id === updatedBooking.id);
+        if (idx >= 0) {
+            bookings[idx] = updatedBooking;
+            localStorage.setItem('parkease_bookings', JSON.stringify(bookings));
+        }
+    } catch(e) {}
+}
+
+function handleActiveBookingRateAttempt(booking) {
+    const now = Date.now();
+    const isStillActive = booking.status === 'Active' && (!booking.expiresAt || now < booking.expiresAt);
+
+    if (isStillActive) {
+        const wantsToExit = confirm(
+            `⏳ PARKING SESSION ACTIVE (${booking.duration})\n\n` +
+            `Slot: ${booking.slotNumber} • Spot: ${booking.spotName}\n\n` +
+            `Reviews can only be submitted after your parking duration ends or when you exit the facility.\n\n` +
+            `Would you like to complete and exit your parking now to submit your review?`
+        );
+        if (wantsToExit) {
+            completeActiveParkingEarly(booking, true);
+            closeMyBookingsDrawer();
+            openRatingModal(booking.spotId, booking);
+        }
+    } else {
+        closeMyBookingsDrawer();
+        openRatingModal(booking.spotId, booking);
+    }
+}
+
 function closePassModal() {
+    if (passCountdownInterval) {
+        clearInterval(passCountdownInterval);
+        passCountdownInterval = null;
+    }
     const passModal = document.getElementById('passModal');
     passModal.classList.add('hidden');
     passModal.classList.remove('flex');
@@ -1560,34 +1845,50 @@ function openMyBookingsDrawer() {
             </div>
         `;
     } else {
-        container.innerHTML = bookings.map(b => `
-            <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-sky-300 transition-all w-full max-w-full overflow-hidden min-w-0">
-                <div class="flex items-center justify-between text-xs mb-1.5 min-w-0">
-                    <span class="font-bold text-sky-700 truncate mr-2">${b.id}</span>
-                    <span class="px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${b.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${b.status}</span>
+        container.innerHTML = bookings.map(b => {
+            const now = Date.now();
+            const isExpired = b.status === 'Completed' || (b.expiresAt && now >= b.expiresAt);
+
+            const statusBadge = isExpired
+                ? `<span class="px-2 py-0.5 rounded-full font-semibold flex-shrink-0 bg-slate-200 text-slate-700">Completed</span>`
+                : `<span class="px-2 py-0.5 rounded-full font-semibold flex-shrink-0 bg-emerald-100 text-emerald-800 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>Active</span>`;
+
+            const rateBtn = isExpired
+                ? `<button onclick='openRatingModalFromBooking(${JSON.stringify(b)})' class="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all flex-shrink-0" title="Rate this completed service">
+                    <i data-lucide="star" class="w-3.5 h-3.5 fill-white"></i>
+                    <span>Rate</span>
+                </button>`
+                : `<button onclick='handleActiveBookingRateAttempt(${JSON.stringify(b)})' class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all flex-shrink-0" title="Review locked while parking is active">
+                    <i data-lucide="lock" class="w-3.5 h-3.5 text-slate-500"></i>
+                    <span>Locked</span>
+                </button>`;
+
+            return `
+                <div class="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-sky-300 transition-all w-full max-w-full overflow-hidden min-w-0">
+                    <div class="flex items-center justify-between text-xs mb-1.5 min-w-0">
+                        <span class="font-bold text-sky-700 truncate mr-2">${b.id}</span>
+                        ${statusBadge}
+                    </div>
+                    <h4 class="font-bold text-sm text-slate-900 truncate" title="${b.spotName}">${b.spotName}</h4>
+                    <p class="text-xs text-slate-500 mt-0.5 truncate">${b.area}</p>
+                    <div class="mt-3 grid grid-cols-2 gap-2 text-xs bg-white p-2.5 rounded-lg border border-slate-100 min-w-0">
+                        <div class="truncate"><span class="text-slate-400">Slot:</span> <b class="text-slate-800">${b.slotNumber}</b></div>
+                        <div class="truncate"><span class="text-slate-400">Vehicle:</span> <b class="text-slate-800">${b.vehicleNumber}</b></div>
+                        <div class="truncate"><span class="text-slate-400">Duration:</span> <b class="text-slate-800">${b.duration}</b></div>
+                        <div class="truncate"><span class="text-slate-400">Amount:</span> <b class="text-emerald-600">${b.totalPaid}</b></div>
+                    </div>
+                    <div class="mt-3 flex items-center gap-2 w-full min-w-0">
+                        <button onclick='renderPass(${JSON.stringify(b)})' class="flex-1 min-w-0 py-1.5 px-2 bg-sky-600 text-white rounded text-xs font-semibold hover:bg-sky-700 truncate">
+                            View QR Pass
+                        </button>
+                        ${rateBtn}
+                        <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}" target="_blank" class="px-3 py-1.5 bg-slate-200 text-slate-800 rounded text-xs font-semibold hover:bg-slate-300 flex items-center justify-center flex-shrink-0" title="Start Navigation">
+                            <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+                        </a>
+                    </div>
                 </div>
-                <h4 class="font-bold text-sm text-slate-900 truncate" title="${b.spotName}">${b.spotName}</h4>
-                <p class="text-xs text-slate-500 mt-0.5 truncate">${b.area}</p>
-                <div class="mt-3 grid grid-cols-2 gap-2 text-xs bg-white p-2.5 rounded-lg border border-slate-100 min-w-0">
-                    <div class="truncate"><span class="text-slate-400">Slot:</span> <b class="text-slate-800">${b.slotNumber}</b></div>
-                    <div class="truncate"><span class="text-slate-400">Vehicle:</span> <b class="text-slate-800">${b.vehicleNumber}</b></div>
-                    <div class="truncate"><span class="text-slate-400">Duration:</span> <b class="text-slate-800">${b.duration} hrs</b></div>
-                    <div class="truncate"><span class="text-slate-400">Amount:</span> <b class="text-emerald-600">${b.totalPaid}</b></div>
-                </div>
-                <div class="mt-3 flex items-center gap-2 w-full min-w-0">
-                    <button onclick='renderPass(${JSON.stringify(b)})' class="flex-1 min-w-0 py-1.5 px-2 bg-sky-600 text-white rounded text-xs font-semibold hover:bg-sky-700 truncate">
-                        View QR Pass
-                    </button>
-                    <button onclick='openRatingModalFromBooking(${JSON.stringify(b)})' class="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold flex items-center justify-center gap-1 shadow-sm transition-all flex-shrink-0" title="Rate this parking service">
-                        <i data-lucide="star" class="w-3.5 h-3.5 fill-white"></i>
-                        <span>Rate</span>
-                    </button>
-                    <a href="https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}" target="_blank" class="px-3 py-1.5 bg-slate-200 text-slate-800 rounded text-xs font-semibold hover:bg-slate-300 flex items-center justify-center flex-shrink-0" title="Start Navigation">
-                        <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
-                    </a>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
     
     lucide.createIcons();
@@ -1785,6 +2086,12 @@ function openRatingModalFromCurrentPass() {
 }
 
 function openRatingModalFromBooking(booking) {
+    const now = Date.now();
+    const isStillActive = booking.status === 'Active' && (!booking.expiresAt || now < booking.expiresAt);
+    if (isStillActive) {
+        handleActiveBookingRateAttempt(booking);
+        return;
+    }
     closeMyBookingsDrawer();
     openRatingModal(booking.spotId, booking);
 }
@@ -1802,6 +2109,29 @@ function openGenericRatingModal(spotId = null) {
 function openRatingModal(spotId, booking = null, allowSelectSpot = false) {
     const modal = document.getElementById('ratingModal');
     if (!modal) return;
+
+    // Check if user has an active in-progress parking session at this facility
+    let activeBookingAtSpot = null;
+    try {
+        const bookings = JSON.parse(localStorage.getItem('parkease_bookings') || '[]');
+        const now = Date.now();
+        activeBookingAtSpot = bookings.find(b => b.spotId === spotId && b.status === 'Active' && (!b.expiresAt || now < b.expiresAt));
+    } catch(e) {}
+
+    if (!booking && activeBookingAtSpot) {
+        const shouldExit = confirm(
+            `⏳ PARKING SESSION IN PROGRESS!\n\n` +
+            `You currently have an active parking session at "${activeBookingAtSpot.spotName}" (Slot: ${activeBookingAtSpot.slotNumber}).\n\n` +
+            `Driver reviews are verified after your session expires or upon exiting the facility.\n\n` +
+            `Would you like to complete and exit your parking now to submit your review?`
+        );
+        if (shouldExit) {
+            completeActiveParkingEarly(activeBookingAtSpot, true);
+            booking = activeBookingAtSpot;
+        } else {
+            return;
+        }
+    }
 
     let spot = allSpots.find(s => s.id === spotId) || allSpots[0];
     activeRatingSpot = spot;
